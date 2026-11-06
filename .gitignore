@@ -1,0 +1,8 @@
+dist/
+__pycache__/
+node_modules/
+*.xls
+*.xlsx
+# dữ liệu thật của nhà máy: không đưa lên repo
+data/seed.json
+data/alias.json
