@@ -1,9 +1,10 @@
 """Build the page from src/ (and, locally, data/).
 
-  PAGE_PASSWORD='...' python3 build.py
-      -> index.html: the GitHub Pages site. The app (without factory data) is
-         encrypted with the password (PBKDF2-SHA256 + AES-GCM); the password
-         itself is never written to the repo. Without PAGE_PASSWORD you are asked for it.
+  PAGE_PASSWORD='...' python3 build.py [--with-data]
+      -> index.html: the GitHub Pages site. The app is encrypted with the password
+         (PBKDF2-SHA256 + AES-GCM); the password itself is never written to the repo.
+         --with-data embeds data/seed.json inside the encrypted page, so the factory
+         data is only readable after entering the password. Without PAGE_PASSWORD you are asked for it.
 
   python3 build.py --artifact
       -> dist/artifact.html: page body for publishing as a Claude artifact,
@@ -51,9 +52,9 @@ def pages():
     pw = os.environ.get('PAGE_PASSWORD') or getpass.getpass('Mật khẩu cho trang GitHub Pages: ')
     if not pw:
         sys.exit('Cần mật khẩu (biến môi trường PAGE_PASSWORD).')
-    salt, iv, it = os.urandom(16), os.urandom(12), 310000
+    salt, iv, it = os.urandom(16), os.urandom(12), 600000
     key = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt, it, 32)
-    ct = AESGCM(key).encrypt(iv, standalone(page(False)).encode('utf-8'), None)
+    ct = AESGCM(key).encrypt(iv, standalone(page('--with-data' in sys.argv)).encode('utf-8'), None)
     enc = lambda b: base64.b64encode(b).decode()
     payload = json.dumps({'salt': enc(salt), 'iv': enc(iv), 'iter': it, 'ct': enc(ct)})
     write('index.html', rd('src', 'gate.tmpl.html').replace('/*PAYLOAD*/null', payload))

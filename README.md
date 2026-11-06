@@ -16,9 +16,10 @@ Trang web để đối chiếu lượng hóa chất **Actual** (định mức g/
 
 ## Dữ liệu và mật khẩu
 
-- Repo này **không** chứa dữ liệu nhà máy. Trên trang web, mỗi người tự nhập Report và định mức; dữ liệu chỉ lưu trong trình duyệt của người đó (localStorage). Nên tải bản sao lưu định kỳ.
 - `index.html` là trang đã được mã hóa bằng mật khẩu (PBKDF2-SHA256, AES-GCM). Mật khẩu không được ghi trong repo.
-- Mật khẩu chặn người không biết mật khẩu mở trang. Vì mã nguồn trong `src/` vẫn công khai, đừng đưa dữ liệu thật vào repo.
+- `index.html` trong repo không kèm dữ liệu nhà máy. Build với `--with-data` thì dữ liệu ban đầu (định mức F1 19–24/10, F2 26–31/10, Report tháng 10/2026) được đặt **bên trong** phần mã hóa, chỉ đọc được sau khi nhập đúng mật khẩu.
+- File dữ liệu gốc `data/seed.json` không đưa lên repo, vì để dạng chữ rõ thì mật khẩu không còn tác dụng.
+- Những gì người dùng nhập thêm chỉ lưu trong trình duyệt của người đó (localStorage). Nên tải bản sao lưu định kỳ.
 
 ## Bật GitHub Pages (làm một lần)
 
@@ -27,13 +28,13 @@ Settings → Pages → Build and deployment → Source: **Deploy from a branch**
 ## Sửa và build lại
 
 ```bash
-PAGE_PASSWORD='mật khẩu' python3 build.py   # tạo lại index.html cho GitHub Pages (cần: pip install cryptography)
+PAGE_PASSWORD='mật khẩu' python3 build.py --with-data   # tạo lại index.html cho GitHub Pages, kèm dữ liệu (cần: pip install cryptography)
 python3 build.py --artifact                 # dist/artifact.html: bản đăng lên claude.ai, kèm data/seed.json nếu có
 python3 build.py --local                    # dist/local.html: bản dùng riêng có dữ liệu, không mật khẩu
 node tests/test_core.js                     # kiểm tra tổng Actual/Report (cần data/seed.json)
 ```
 
-Đổi mật khẩu: chạy lại lệnh đầu với mật khẩu mới rồi commit `index.html`.
+Đổi mật khẩu: chạy lại lệnh đầu với mật khẩu mới rồi commit `index.html`. Bỏ `--with-data` nếu muốn trang trống, không kèm dữ liệu.
 
 | Đường dẫn | Nội dung |
 |---|---|
@@ -42,7 +43,7 @@ node tests/test_core.js                     # kiểm tra tổng Actual/Report (c
 | `src/page.tmpl.html` | CSS và khung trang |
 | `src/gate.tmpl.html` | Trang nhập mật khẩu |
 | `build.py` | Ghép và mã hóa thành `index.html` |
-| `data/` | Dữ liệu nhà máy (chỉ có trên máy, không đưa lên repo) |
+| `data/` | Dữ liệu nhà máy dạng rõ (chỉ có trên máy, không đưa lên repo; bản mã hóa nằm trong `index.html`) |
 
 ## Cách tính
 
