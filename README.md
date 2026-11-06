@@ -17,7 +17,7 @@ Trang web để đối chiếu lượng hóa chất **Actual** (định mức g/
 ## Dữ liệu và mật khẩu
 
 - `index.html` là trang đã được mã hóa bằng mật khẩu (PBKDF2-SHA256, AES-GCM). Mật khẩu không được ghi trong repo.
-- `index.html` trong repo không kèm dữ liệu nhà máy. Build với `--with-data` thì dữ liệu ban đầu (định mức F1 19–24/10, F2 26–31/10, Report tháng 10/2026) được đặt **bên trong** phần mã hóa, chỉ đọc được sau khi nhập đúng mật khẩu.
+- `index.html` trong repo được build với `--with-data`: dữ liệu ban đầu (định mức F1 19–24/10, F2 26–31/10, Report tháng 10/2026) nằm **bên trong** phần mã hóa, chỉ đọc được sau khi nhập đúng mật khẩu.
 - File dữ liệu gốc `data/seed.json` không đưa lên repo, vì để dạng chữ rõ thì mật khẩu không còn tác dụng.
 - Những gì người dùng nhập thêm chỉ lưu trong trình duyệt của người đó (localStorage). Nên tải bản sao lưu định kỳ.
 
