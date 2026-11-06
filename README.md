@@ -19,7 +19,16 @@ Trang web để đối chiếu lượng hóa chất **Actual** (định mức g/
 - `index.html` là trang đã được mã hóa bằng mật khẩu (PBKDF2-SHA256, AES-GCM). Mật khẩu không được ghi trong repo.
 - `index.html` trong repo được build với `--with-data`: dữ liệu ban đầu (định mức F1 19–24/10, F2 26–31/10, Report tháng 10/2026) nằm **bên trong** phần mã hóa, chỉ đọc được sau khi nhập đúng mật khẩu.
 - File dữ liệu gốc `data/seed.json` không đưa lên repo, vì để dạng chữ rõ thì mật khẩu không còn tác dụng.
-- Những gì người dùng nhập thêm chỉ lưu trong trình duyệt của người đó (localStorage). Nên tải bản sao lưu định kỳ.
+- Khi build có `SYNC_URL`, mọi thay đổi được lưu chung trong một Google Sheet (xem mục dưới) và mọi trình duyệt tự cập nhật khoảng 30 giây một lần. Không có `SYNC_URL` thì dữ liệu chỉ nằm trong trình duyệt của từng người (localStorage).
+
+## Đồng bộ qua Google Sheets
+
+1. Tạo một Google Sheet → Extensions → Apps Script → dán `apps-script/Code.gs` → Save.
+2. Project Settings → Script properties → thêm `PASSWORD` = mật khẩu của trang.
+3. Deploy → New deployment → Web app; Execute as: **Me**, Who has access: **Anyone** → Deploy, cấp quyền.
+4. Build lại với link Web app: `SYNC_URL='https://script.google.com/macros/s/…/exec' PAGE_PASSWORD='…' python3 build.py --with-data`.
+
+Mỗi tài liệu (bảng Comparison, một tuần, một ngày Report) là một dòng trong sheet `data`. Lần đầu sheet còn trống, trang tự đưa dữ liệu ban đầu lên. Apps Script kiểm tra mật khẩu ở phía Google; link Web app nằm trong phần đã mã hóa của `index.html`. Nếu hai người sửa cùng một tuần cùng lúc, bản lưu sau cùng thắng.
 
 ## Bật GitHub Pages (làm một lần)
 
@@ -43,6 +52,7 @@ node tests/test_core.js                     # kiểm tra tổng Actual/Report (c
 | `src/page.tmpl.html` | CSS và khung trang |
 | `src/gate.tmpl.html` | Trang nhập mật khẩu |
 | `build.py` | Ghép và mã hóa thành `index.html` |
+| `apps-script/Code.gs` | Kho dữ liệu chung trên Google Sheets (Apps Script web app) |
 | `data/` | Dữ liệu nhà máy dạng rõ (chỉ có trên máy, không đưa lên repo; bản mã hóa nằm trong `index.html`) |
 
 ## Cách tính

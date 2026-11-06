@@ -82,6 +82,8 @@ const Store = {
     let c = null;
     try { if (window.claude && window.claude.use) c = await window.claude.use('db'); } catch (e) { c = null; }
     if (c) { this.db = c; this.mode = 'db'; this.subscribe(); return; }
+    const url = syncUrl();
+    if (url && SYNC && SYNC.token) { this.mode = 'sheet'; this.sheetStart(url, SYNC.token); return; }
     this.mode = 'local';
     try {
       const raw = localStorage.getItem('hoachat-v2');
@@ -156,6 +158,12 @@ const Store = {
   },
   mark(path, body) {
     if (this.mode === 'local') { clearTimeout(this.timers.local); this.timers.local = setTimeout(() => this.saveLocal(), 500); return; }
+    if (this.mode === 'sheet') {
+      this.dirty.add(path); this.getters[path] = body; this.seq[path] = (this.seq[path] || 0) + 1;
+      this.setStatus('saving'); clearTimeout(this.timers.sheet);
+      if (this.ready) this.timers.sheet = setTimeout(() => this.sheetFlush(), 1000);
+      return;
+    }
     if (this.mode !== 'db' || this.readonly) return;
     this.dirty.add(path); this.setStatus('saving');
     clearTimeout(this.timers[path]);
@@ -174,6 +182,7 @@ const Store = {
   dropWeek(f, id) { this.markRows(f); this.mark('weeks_' + f + '/' + id, () => null); },
   saveDay(f, date, rows) {
     if (this.mode === 'local') { this.mark('local'); return; }
+    if (this.mode === 'sheet') { this.mark('report_' + f + '/' + date, () => this.dayBody(rows)); return; }
     if (this.mode !== 'db' || this.readonly) return;
     this.setStatus('saving');
     this.enqueue(async () => { await this.db.doc('report_' + f + '/' + date).set(this.dayBody(rows)); if (!this.dirty.size && S.status === 'saving') this.setStatus('saved'); });
@@ -185,6 +194,101 @@ const Store = {
       else this.setStatus('error', e && e.message);
     });
     return this.chain;
+  },
+  /* ----- Google Sheets (Apps Script web app) ----- */
+  getters: {}, seq: {}, ready: false, lastT: 0, lastSync: 0,
+  async sheetCall(body) {
+    let r;
+    try {
+      r = await fetch(this.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ pw: this.token }, body)) });
+    } catch (e) { throw { code: 'network' }; }
+    if (!r.ok) throw { code: 'http', message: 'HTTP ' + r.status };
+    let j; try { j = await r.json(); } catch (e) { throw { code: 'http', message: 'phản hồi không hợp lệ' }; }
+    if (!j.ok) throw { code: j.error || 'server', message: j.message };
+    return j;
+  },
+  sheetError(e) {
+    const m = { unauthorized: 'mật khẩu ở Google Sheets không khớp với mật khẩu trang', not_configured: 'Google Sheets chưa đặt PASSWORD trong Script properties', network: 'không kết nối được Google Sheets, sẽ thử lại' };
+    this.setStatus('error', m[e && e.code] || (e && e.message) || 'không rõ lỗi');
+  },
+  async sheetStart(url, token) {
+    this.url = url; this.token = token;
+    this.setStatus('pending');
+    await this.sheetInitial();
+    setInterval(() => this.sheetPoll(), 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.sheetPoll(); });
+  },
+  async sheetInitial() {
+    try {
+      const j = await this.sheetCall({ op: 'pull', since: 0 });
+      this.ready = true;
+      if (!j.docs.length) await this.sheetSeed();
+      else { this.applyDocs(j.docs, true); this.lastT = j.now; }
+      this.lastSync = Date.now();
+      if (this.dirty.size) await this.sheetFlush(); else this.setStatus('saved');
+      renderAll();
+    } catch (e) { this.sheetError(e); }
+  },
+  async sheetSeed() { /* an empty sheet: upload what this page starts with */
+    for (const f of ['f1', 'f2']) {
+      this.markRows(f);
+      D[f].weeks.forEach(w => this.markWeek(f, w));
+      for (const day of reportDates(D[f].report)) this.saveDay(f, day, D[f].report[day]);
+    }
+    clearTimeout(this.timers.sheet);
+    await this.sheetFlush();
+  },
+  async sheetFlush() {
+    if (!this.ready) return;
+    if (this.flushing) { this.flushAgain = true; return; }
+    const snap = [...this.dirty].map(p => ({ p, seq: this.seq[p], body: this.getters[p] ? this.getters[p]() : null }));
+    if (!snap.length) return;
+    this.flushing = true;
+    let failed = false;
+    try {
+      const docs = snap.map(x => ({ key: x.p, rev: (this.rev[x.p] = Math.random().toString(36).slice(2)), body: x.body }));
+      for (let i = 0; i < docs.length; i += 25) await this.sheetCall({ op: 'push', docs: docs.slice(i, i + 25) });
+      for (const x of snap) if (this.seq[x.p] === x.seq) this.dirty.delete(x.p);
+      this.lastSync = Date.now();
+      if (!this.dirty.size) this.setStatus('saved');
+    } catch (e) { failed = true; this.sheetError(e); }
+    this.flushing = false;
+    if (this.dirty.size && (this.flushAgain || !failed)) { this.flushAgain = false; clearTimeout(this.timers.sheet); this.timers.sheet = setTimeout(() => this.sheetFlush(), 800); }
+    this.flushAgain = false;
+  },
+  async sheetPoll() {
+    if (this.mode !== 'sheet' || document.hidden || this.polling) return;
+    if (!this.ready) { await this.sheetInitial(); return; }
+    this.polling = true;
+    try {
+      if (this.dirty.size && !this.flushing) await this.sheetFlush();
+      const j = await this.sheetCall({ op: 'pull', since: this.lastT });
+      if (j.docs.length && this.applyDocs(j.docs, false)) renderSafe();
+      this.lastT = Math.max(this.lastT, j.now || 0);
+      this.lastSync = Date.now();
+      if (!this.dirty.size) this.setStatus('saved');
+    } catch (e) { this.sheetError(e); }
+    this.polling = false;
+  },
+  applyDocs(docs, initial) {
+    let changed = false;
+    if (initial) for (const f of ['f1', 'f2']) if (docs.some(d => d.key === 'app/' + f)) { D[f].weeks = []; changed = true; }
+    for (const d of docs) {
+      if (d.t > this.lastT) this.lastT = d.t;
+      if (this.dirty.has(d.key)) continue;
+      if (!initial && d.rev && d.rev === this.rev[d.key]) continue;
+      const [col, id] = d.key.split('/');
+      const f = col === 'app' ? id : col.split('_')[1];
+      if (!D[f]) continue;
+      if (col === 'app') { if (d.body && d.body.rows) { D[f].rows = d.body.rows; changed = true; } }
+      else if (col.startsWith('weeks_')) {
+        const i = D[f].weeks.findIndex(w => w.id === id);
+        if (!d.body) { if (i >= 0) { D[f].weeks.splice(i, 1); changed = true; } }
+        else { const w = Object.assign({ id }, d.body); if (i >= 0) D[f].weeks[i] = w; else D[f].weeks.push(w); changed = true; }
+      } else if (col.startsWith('report_')) { D[f].report[id] = d.body ? this.dayRows(d.body) : []; changed = true; }
+    }
+    if (changed) for (const f of ['f1', 'f2']) { sortWeeks(f); fixView(f); }
+    return changed;
   },
   saveLocal() {
     try {
@@ -203,6 +307,21 @@ function fixView(f) {
   if (v && v.startsWith('M:')) return;
   if (!weekById(f, v)) S.view[f] = D[f].weeks.length ? D[f].weeks[D[f].weeks.length - 1].id : null;
 }
+function syncUrl() {
+  let u = '';
+  try { u = localStorage.getItem('hc-sync-url') || ''; } catch (e) { /* ignore */ }
+  return u || (SYNC && SYNC.url) || '';
+}
+/* a remote change arrives while someone is typing: wait until they leave the field */
+function renderSafe() {
+  const a = document.activeElement;
+  if (a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]), textarea, select') && a.closest('main, #period')) { S.pendingRender = true; return; }
+  renderAll();
+}
+document.addEventListener('focusout', () => {
+  if (!S.pendingRender) return;
+  setTimeout(() => { const a = document.activeElement; if (!(a && a.matches && a.matches('input, textarea, select'))) { S.pendingRender = false; renderAll(); } }, 0);
+});
 const touchWeek = () => { if (CTX && CTX.week) Store.markWeek(S.fac, CTX.week); };
 const touchRows = () => Store.markRows(S.fac);
 
@@ -212,7 +331,12 @@ const STATUS = {
   readonly: ['warn', 'Chỉ xem: tài khoản này không có quyền ghi'], error: ['bad', 'Lưu lỗi'], memory: ['warn', 'Không lưu được, dữ liệu mất khi đóng trang']
 };
 function renderStatus() {
-  const [k, t] = STATUS[S.status] || STATUS.pending;
+  let [k, t] = STATUS[S.status] || STATUS.pending;
+  if (Store.mode === 'sheet') {
+    if (S.status === 'saved') t = 'Đã đồng bộ Google Sheets' + (Store.lastSync ? ' · ' + fmtStamp(new Date(Store.lastSync).toISOString()).slice(6) : '');
+    if (S.status === 'pending') t = 'Đang tải dữ liệu từ Google Sheets…';
+    if (S.status === 'error') t = 'Đồng bộ lỗi';
+  }
   const el = $('#status'); if (!el) return;
   el.className = 'status ' + k;
   $('#status-t').textContent = t + (S.statusNote && S.status === 'error' ? ': ' + S.statusNote : '');
@@ -532,8 +656,15 @@ function renderReport() {
     ${xs.slice().reverse().map(({ date: x }) => { const r = d.report[x]; return `<tr><td class="nm">${fmtDY(x)} <small>W${isoWeek(x)}</small></td><td class="r num">${r.length}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[2]), 0))}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[3]), 0))}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[4]), 0))}</td><td>${Store.readonly ? '' : `<button class="btn sm danger" data-a="day-del" data-d="${x}">${S.confirm === 'day:' + x ? 'Bấm lần nữa' : 'Xóa ngày'}</button>`}</td></tr>`; }).join('')}
     </tbody></table></div></details>`; }).join('') || '<p class="empty-r">Chưa có ngày nào. Chọn file Chemical Daily Report ở trên để bắt đầu.</p>'}
   </section>
+  ${Store.mode === 'db' ? '' : `<section class="sync"><h3>Đồng bộ giữa các trình duyệt</h3>
+    ${Store.mode === 'sheet' ? `<p class="mute">Dữ liệu được lưu chung trong Google Sheets: mọi trình duyệt mở trang đều thấy cùng dữ liệu, tự cập nhật khoảng 30 giây một lần.${Store.lastSync ? ' Lần đồng bộ gần nhất: ' + fmtStamp(new Date(Store.lastSync).toISOString()) + '.' : ''}</p>
+      <div class="mact"><button class="btn" data-a="sync-now">Đồng bộ ngay</button></div>`
+    : SYNC && SYNC.token ? `<p class="mute">Chưa nối Google Sheets nên dữ liệu chỉ nằm trong trình duyệt này. Dán Web app URL của Apps Script để nối (chỉ áp dụng cho trình duyệt này).</p>
+      <form class="mact" data-form="sync"><input id="sync-url" type="url" placeholder="https://script.google.com/macros/s/…/exec" aria-label="Web app URL"><button class="btn primary" type="submit">Nối Google Sheets</button></form>`
+    : '<p class="mute">Bản trang này chưa được build để đồng bộ.</p>'}
+  </section>`}
   <section class="backup"><h3>Sao lưu dữ liệu</h3>
-    <p class="mute">${Store.mode === 'db' ? 'Dữ liệu đang được lưu chung trong kho của trang.' : 'Dữ liệu chỉ nằm trong trình duyệt này. Nên tải bản sao lưu định kỳ, và dùng nó để chuyển sang máy khác.'} Bản sao lưu gồm cả F1 và F2: tuần, định mức model, bảng Comparison và Report.</p>
+    <p class="mute">${Store.mode === 'db' ? 'Dữ liệu đang được lưu chung trong kho của trang.' : Store.mode === 'sheet' ? 'Có thể tải thêm một bản sao lưu để giữ riêng.' : 'Dữ liệu chỉ nằm trong trình duyệt này. Nên tải bản sao lưu định kỳ, và dùng nó để chuyển sang máy khác.'} Bản sao lưu gồm cả F1 và F2: tuần, định mức model, bảng Comparison và Report.</p>
     <div class="mact">${canSave() ? '<button class="btn" data-a="backup">Tải bản sao lưu (.json)</button>' : ''}${Store.readonly ? '' : '<label class="btn" for="restore">Khôi phục từ bản sao lưu<input type="file" id="restore" accept=".json,application/json" hidden></label>'}</div>
   </section>`;
   $$('[data-mixed]').forEach(x => { x.indeterminate = true; });
@@ -717,6 +848,7 @@ document.addEventListener('click', e => {
     case 'day-del': { const k = t.dataset.d; two('day:' + k, () => { d.report[k] = []; Store.saveDay(S.fac, k, []); renderReport(); }, renderReport); break; }
     case 'mon-del': { const mon = t.dataset.m; two('mon:' + mon, () => { for (const k of reportDates(d.report)) if (k.slice(0, 7) === mon) { d.report[k] = []; Store.saveDay(S.fac, k, []); } S.openMonth = null; renderReport(); }, renderReport); break; }
     case 'backup': doBackup(); break;
+    case 'sync-now': Store.sheetPoll().then(() => { if (S.tab === 'rep') renderReport(); }); break;
     case 'mon-view': S.view[S.fac] = 'M:' + t.dataset.m; S.tab = 'cmp'; renderAll(); break;
   }
 });
@@ -770,6 +902,11 @@ document.addEventListener('submit', e => {
   if (f.dataset.form === 'addrow') {
     const name = $('#ar-name').value.trim(), rep = $('#ar-rep').value; if (!name) return;
     const id = uid('c'); d.rows.push({ id, name, rep: rep ? [rep] : [name], code: '', adj: 1 }); S.sel[S.fac] = id; S.addRow = false; touchRows(); renderCmp();
+  } else if (f.dataset.form === 'sync') {
+    const u = $('#sync-url').value.trim();
+    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) { S.importMsg = '!Link phải là Web app URL của Apps Script (https://script.google.com/macros/s/…/exec).'; renderReport(); return; }
+    try { localStorage.setItem('hc-sync-url', u); } catch (e) { /* ignore */ }
+    Store.mode = 'sheet'; S.importMsg = 'Đang nối Google Sheets…'; Store.sheetStart(u, SYNC.token).then(() => { S.importMsg = ''; renderAll(); });
   } else if (f.dataset.form === 'newweek') {
     let from = $('#nw-from').value, to = $('#nw-to').value; if (!from || !to) return;
     if (from > to) [from, to] = [to, from];

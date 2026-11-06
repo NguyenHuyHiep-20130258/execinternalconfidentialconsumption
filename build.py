@@ -5,6 +5,8 @@
          (PBKDF2-SHA256 + AES-GCM); the password itself is never written to the repo.
          --with-data embeds data/seed.json inside the encrypted page, so the factory
          data is only readable after entering the password. Without PAGE_PASSWORD you are asked for it.
+         SYNC_URL='https://script.google.com/macros/s/.../exec' adds sync through Google Sheets
+         (apps-script/Code.gs); the URL is also kept inside the encrypted part.
 
   python3 build.py --artifact
       -> dist/artifact.html: page body for publishing as a Claude artifact,
@@ -20,7 +22,7 @@ rd = lambda *p: open(os.path.join(root, *p), encoding='utf-8').read()
 EMPTY_SEED, EMPTY_ALIAS = '{"f1":{},"f2":{}}', '{}'
 
 
-def page(with_data):
+def page(with_data, sync='null'):
     seed, alias = EMPTY_SEED, EMPTY_ALIAS
     if with_data and os.path.exists(os.path.join(root, 'data', 'seed.json')):
         seed = rd('data', 'seed.json')
@@ -29,7 +31,7 @@ def page(with_data):
     assert '</script' not in seed
     core = rd('src', 'core.js').replace("if (typeof module !== 'undefined') module.exports", "if (false) module.exports")
     return (rd('src', 'page.tmpl.html')
-            .replace('/*SEED*/null', seed).replace('/*ALIAS*/null', alias)
+            .replace('/*SEED*/null', seed).replace('/*ALIAS*/null', alias).replace('/*SYNC*/null', sync)
             .replace('/*CORE*/', core).replace('/*APP*/', rd('src', 'app.js')))
 
 
@@ -54,7 +56,8 @@ def pages():
         sys.exit('Cần mật khẩu (biến môi trường PAGE_PASSWORD).')
     salt, iv, it = os.urandom(16), os.urandom(12), 600000
     key = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt, it, 32)
-    ct = AESGCM(key).encrypt(iv, standalone(page('--with-data' in sys.argv)).encode('utf-8'), None)
+    sync = json.dumps({'url': os.environ.get('SYNC_URL', '').strip(), 'token': pw})
+    ct = AESGCM(key).encrypt(iv, standalone(page('--with-data' in sys.argv, sync)).encode('utf-8'), None)
     enc = lambda b: base64.b64encode(b).decode()
     payload = json.dumps({'salt': enc(salt), 'iv': enc(iv), 'iter': it, 'ct': enc(ct)})
     write('index.html', rd('src', 'gate.tmpl.html').replace('/*PAYLOAD*/null', payload))
