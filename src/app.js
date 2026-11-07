@@ -315,7 +315,7 @@ function syncUrl() {
 /* a remote change arrives while someone is typing: wait until they leave the field */
 function renderSafe() {
   const a = document.activeElement;
-  if (a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]), textarea, select') && a.closest('main, #period')) { S.pendingRender = true; return; }
+  if (CP.open || (a && a.matches && a.matches('input:not([type=checkbox]):not([type=radio]), textarea, select') && a.closest('main, #period'))) { S.pendingRender = true; return; }
   renderAll();
 }
 document.addEventListener('focusout', () => {
@@ -350,6 +350,93 @@ function chemOptions(selected, filter) {
   if (selected && !cat.has(sk)) h += `<option value="${esc(selected)}" selected>${esc(selected)} (không có trong Report)</option>`;
   return h;
 }
+/* ---------- searchable picker (chemicals from the Report, models) ---------- */
+const chemLabel = v => { const c = CAT().get(norm(v)); return c ? c.name + (c.code ? ' · ' + c.code : '') : v + ' (không có trong Report)'; };
+function pickBtn({ id, kind, value = '', label = '', ph, extra = '', disabled = false, exclude = '' }) {
+  return `<button type="button" class="cp-btn" id="${id}" data-cp="${kind}" data-v="${esc(value)}" data-x="${esc(exclude)}" data-ph="${esc(ph)}" ${extra} ${disabled ? 'disabled' : ''} aria-haspopup="listbox" aria-expanded="false">`
+    + `<span class="cp-t">${value ? esc(label) : `<span class="mute">${esc(ph)}</span>`}</span><span class="cp-car" aria-hidden="true"></span></button>`;
+}
+function setPick(btn, v, label) {
+  btn.dataset.v = v;
+  btn.querySelector('.cp-t').innerHTML = v ? esc(label) : `<span class="mute">${esc(btn.dataset.ph)}</span>`;
+}
+const CP = { open: false, btn: null, items: [], shown: [], active: 0 };
+function pickItems(btn) {
+  if (btn.dataset.cp === 'model') {
+    const it = itemById(S.sel[S.fac]); const have = new Set(it ? drillLines(it.id).map(x => x.m.id) : []);
+    return CTX.models.filter(m => !have.has(m.id)).map(m => ({ v: m.id, t: m.name || '(chưa đặt tên)', s: fmt(toNum(m.prs), 0) + ' prs', label: m.name || m.id }));
+  }
+  const out = [];
+  for (const [k, c] of CAT()) if (k !== btn.dataset.x) out.push({ v: c.name, t: c.name, s: c.code, label: c.name + (c.code ? ' · ' + c.code : '') });
+  return out;
+}
+function cpPop() {
+  let el = document.getElementById('cp-pop');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'cp-pop'; el.className = 'cp-pop'; el.hidden = true;
+    el.innerHTML = '<input id="cp-q" type="search" autocomplete="off" aria-label="Tìm" aria-controls="cp-list"><ul id="cp-list" role="listbox"></ul>';
+    document.body.appendChild(el);
+    el.querySelector('#cp-q').addEventListener('input', () => { CP.active = 0; cpRender(); });
+    el.querySelector('#cp-q').addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); CP.active = Math.max(0, Math.min(CP.shown.length - 1, CP.active + (e.key === 'ArrowDown' ? 1 : -1))); cpRender(true); }
+      else if (e.key === 'Enter') { e.preventDefault(); if (CP.shown[CP.active]) cpPick(CP.shown[CP.active]); }
+      else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); const b = CP.btn; cpClose(); if (b && document.body.contains(b)) b.focus(); }
+    });
+  }
+  return el;
+}
+function cpOpen(btn) {
+  const pop = cpPop();
+  CP.open = true; CP.btn = btn; CP.items = pickItems(btn); CP.active = 0;
+  btn.setAttribute('aria-expanded', 'true');
+  const q = pop.querySelector('#cp-q');
+  q.value = ''; q.placeholder = btn.dataset.cp === 'model' ? 'Tìm model' : 'Tìm tên hóa chất hoặc mã vật tư';
+  pop.hidden = false; cpPlace(); cpRender();
+  const cur = CP.shown.findIndex(x => x.v === btn.dataset.v); if (cur >= 0) { CP.active = cur; cpRender(true); }
+  q.focus();
+}
+function cpPlace() {
+  const pop = cpPop(), r = CP.btn.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const w = Math.min(vw - 16, Math.max(r.width, 340));
+  pop.style.width = w + 'px';
+  pop.style.left = Math.max(8, Math.min(r.left, vw - w - 8)) + 'px';
+  const below = vh - r.bottom - 12, above = r.top - 12, up = below < 260 && above > below;
+  const h = Math.min(420, Math.max(180, up ? above : below));
+  pop.style.maxHeight = h + 'px';
+  pop.style.top = (up ? Math.max(8, r.top - h - 4) : r.bottom + 4) + 'px';
+}
+function cpRender(keepScroll) {
+  const pop = cpPop(), q = norm(pop.querySelector('#cp-q').value), toks = q ? q.split(' ') : [];
+  CP.shown = CP.items.filter(x => { const h = norm(x.t + ' ' + x.s); return toks.every(t => h.includes(t)); });
+  const hl = s => { let h = esc(s); for (const t of toks) { if (!t) continue; const i = norm(s).indexOf(t); if (i >= 0 && norm(s).length === s.length) { h = esc(s.slice(0, i)) + '<mark>' + esc(s.slice(i, i + t.length)) + '</mark>' + esc(s.slice(i + t.length)); break; } } return h; };
+  const ul = pop.querySelector('#cp-list');
+  ul.innerHTML = CP.shown.map((x, i) => `<li role="option" data-i="${i}" class="${i === CP.active ? 'on' : ''} ${x.v === CP.btn.dataset.v ? 'cur' : ''}" aria-selected="${i === CP.active}"><span>${hl(x.t)}</span>${x.s ? `<small>${hl(x.s)}</small>` : ''}</li>`).join('')
+    || `<li class="none">Không có ${CP.btn.dataset.cp === 'model' ? 'model' : 'hóa chất'} nào khớp "${esc(pop.querySelector('#cp-q').value)}"</li>`;
+  const on = ul.querySelector('li.on'); if (on && keepScroll) on.scrollIntoView({ block: 'nearest' });
+}
+function cpClose() {
+  if (!CP.open) return;
+  CP.open = false; cpPop().hidden = true;
+  if (CP.btn) CP.btn.setAttribute('aria-expanded', 'false');
+  if (S.pendingRender) { S.pendingRender = false; renderAll(); }
+}
+function cpPick(x) {
+  const btn = CP.btn; cpClose();
+  if (!btn || !document.body.contains(btn)) return;
+  setPick(btn, x.v, x.label);
+  if (btn.dataset.l !== undefined && btn.dataset.cp === 'chem' && CTX.editable) {
+    const i = +btn.dataset.l, m = modelOf(S.msel[S.fac]); if (!m || !m.lines[i]) return;
+    m.lines[i].chem = x.v; touchWeek(); renderMedit();
+    const g = document.getElementById('lg-' + i); if (g) { g.focus(); g.select(); }
+  } else btn.focus();
+}
+window.addEventListener('resize', () => { if (CP.open) cpPlace(); });
+document.addEventListener('scroll', e => {
+  if (!CP.open || (e.target.closest && e.target.closest('#cp-pop'))) return;
+  const r = CP.btn.getBoundingClientRect();
+  if (!document.body.contains(CP.btn) || r.bottom < 0 || r.top > window.innerHeight) cpClose(); else cpPlace();
+}, true);
+
 function ratioInfo(a, r) {
   if (!r && !a) return { t: '—', c: 'mute' };
   if (!r) return { t: 'Chỉ Actual', c: 'bad' };
@@ -460,7 +547,7 @@ function renderCmp() {
   </div>
   ${S.addRow ? `<form class="addrow" data-form="addrow">
       <label for="ar-name">Tên hiển thị<input id="ar-name" required></label>
-      <label for="ar-rep">Hóa chất trong Report<select id="ar-rep">${chemOptions('')}</select></label>
+      <label for="ar-rep">Hóa chất trong Report${pickBtn({ id: 'ar-rep', kind: 'chem', ph: 'Chọn hoặc tìm hóa chất' })}</label>
       <button class="btn primary" type="submit">Thêm dòng</button><button class="btn" type="button" data-a="addrow">Hủy</button></form>` : ''}
   <div class="split">
     <div class="tablewrap"><table class="grid" id="cmpt">
@@ -542,11 +629,11 @@ function renderDrill() {
   <tfoot><tr>${ed ? '<td></td>' : ''}<td class="nm">Cộng</td>${multi ? '<td></td>' : ''}<td class="r num" id="d-sg"></td><td></td><td class="r num" id="d-sk"></td>${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
   ${ed ? `<p class="hint">Total prs là của cả model trong tuần này: đổi ở đây cũng đổi các chất khác của model đó.</p>` : ''}
   ${ed && L.length ? `<section class="swap ${it.flag ? 'hot' : ''}" id="swap"><h3>Đổi chất cho các dòng đã chọn</h3>
-    <div class="dadd"><select id="sw-to" aria-label="Đổi sang chất">${chemOptions('', k => k !== norm(L[0].l.chem))}</select><button class="btn ${it.flag ? 'primary' : ''}" data-a="swap">Đổi chất</button></div>
+    <div class="dadd">${pickBtn({ id: 'sw-to', kind: 'chem', ph: 'Tìm chất thay thế', exclude: norm(L[0].l.chem), extra: 'aria-label="Đổi sang chất"' })}<button class="btn ${it.flag ? 'primary' : ''}" data-a="swap">Đổi chất</button></div>
     ${sugg.length ? `<div class="sugg"><span class="mute">Gợi ý (có Report, chưa có Actual):</span>${sugg.map(x => `<button class="chip" data-a="sugg" data-n="${esc((x.rep.map(n => cat.get(norm(n))).find(Boolean) || { name: x.name }).name)}">${esc(x.name)} <small>${fmt(x.report)} kg</small></button>`).join('')}</div>` : ''}
   </section>` : ''}
   ${S.undo && S.undo.f === S.fac ? `<p class="note">${esc(S.undo.msg)} <button class="btn sm" data-a="undo">Hoàn tác</button></p>` : ''}
-  ${ed && it.kind !== 'x' ? `<div class="dadd"><select id="d-addm" aria-label="Model cần thêm">${addable.map(m => `<option value="${esc(m.id)}">${esc(m.name || m.id)}</option>`).join('')}</select>
+  ${ed && it.kind !== 'x' ? `<div class="dadd">${pickBtn({ id: 'd-addm', kind: 'model', ph: 'Tìm model cần thêm', extra: 'aria-label="Model cần thêm"', disabled: !addable.length })}
     ${it.rep.length > 1 ? `<select id="d-addc" aria-label="Tên trong Report">${it.rep.map(n => `<option>${esc(n)}</option>`).join('')}</select>` : ''}
     <input id="d-addg" class="num" inputmode="decimal" placeholder="g/prs" aria-label="g/prs">
     <button class="btn" data-a="dline-add" ${addable.length ? '' : 'disabled'}>Thêm model chạy chất này</button></div>` : ''}
@@ -596,7 +683,7 @@ function renderMedit() {
   <div class="mhead"><label class="grow" for="m-name">Tên model<input id="m-name" value="${esc(m.name)}" data-i="mname"${dis}></label>
     <label for="m-prs">Total prs (tuần ${wkLabel(CTX.week)})<input id="m-prs" class="num" inputmode="decimal" value="${esc(m.prs)}" data-i="mprs"${dis}></label></div>
   <div class="tablewrap flat"><table class="grid compact"><thead><tr><th>Hóa chất (theo Report)</th><th class="r">g/prs</th><th class="r">kg</th>${ed ? '<th></th>' : ''}</tr></thead>
-   <tbody>${m.lines.map((l, i) => `<tr><td><select id="lk-${i}" data-i="lkey" data-l="${i}" aria-label="Hóa chất dòng ${i + 1}"${dis}>${chemOptions(l.chem)}</select>${l.chem && !cat.has(norm(l.chem)) ? '<small class="warnt">Không có trong Report: chọn lại chất đúng</small>' : ''}</td>
+   <tbody>${m.lines.map((l, i) => `<tr><td>${pickBtn({ id: 'lk-' + i, kind: 'chem', value: l.chem, label: l.chem ? chemLabel(l.chem) : '', ph: 'Chọn hoặc tìm hóa chất', extra: `data-l="${i}" aria-label="Hóa chất dòng ${i + 1}"`, disabled: !ed })}${l.chem && !cat.has(norm(l.chem)) ? '<small class="warnt">Không có trong Report: chọn lại chất đúng</small>' : ''}</td>
       <td class="r"><input class="num" inputmode="decimal" id="lg-${i}" value="${esc(l.g)}" data-i="lg" data-l="${i}" aria-label="g/prs dòng ${i + 1}"${dis}></td>
       <td class="r num" data-mkg="${i}"></td>${ed ? `<td><button class="icon sm" data-a="ldel" data-l="${i}" aria-label="Xóa dòng ${i + 1}">×</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="4" class="empty-r">Model chưa có hóa chất. Thêm từng dòng hoặc dán từ Excel.</td></tr>'}</tbody>
    <tfoot><tr><td class="nm">Cộng</td><td class="r num" id="m-sg"></td><td class="r num" id="m-sk"></td>${ed ? '<td></td>' : ''}</tr></tfoot></table></div>
@@ -709,6 +796,7 @@ function doImport() {
 
 /* ---------- shell ---------- */
 function renderAll() {
+  if (CP.open) { CP.open = false; cpPop().hidden = true; }
   $$('[data-fac]').forEach(b => b.setAttribute('aria-pressed', b.dataset.fac === S.fac ? 'true' : 'false'));
   $$('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === S.tab ? 'true' : 'false'));
   $('#view-cmp').hidden = S.tab !== 'cmp'; $('#view-mdl').hidden = S.tab !== 'mdl'; $('#view-rep').hidden = S.tab !== 'rep';
@@ -787,6 +875,12 @@ function doSwap(target) {
 }
 
 document.addEventListener('click', e => {
+  const li = e.target.closest('#cp-list li[data-i]');
+  if (li) { cpPick(CP.shown[+li.dataset.i]); return; }
+  if (e.target.closest('#cp-pop')) return;
+  const pb = e.target.closest('.cp-btn');
+  if (pb) { if (CP.open && CP.btn === pb) cpClose(); else { cpClose(); cpOpen(pb); } return; }
+  if (CP.open) cpClose();
   const t = e.target.closest('[data-fac],[data-tab],[data-a]'); if (!t) return;
   if (t.dataset.fac) { S.fac = t.dataset.fac; S.confirm = null; S.newWeek = false; renderAll(); return; }
   if (t.dataset.tab) { S.tab = t.dataset.tab; S.confirm = null; renderAll(); return; }
@@ -794,12 +888,12 @@ document.addEventListener('click', e => {
   const two = (key, fn, rerender) => { if (S.confirm !== key) { S.confirm = key; rerender(); return; } S.confirm = null; fn(); };
   switch (a) {
     case 'sel': S.sel[S.fac] = t.dataset.id; $$('#cmpb tr.sel').forEach(x => x.classList.remove('sel')); t.classList.add('sel'); S.confirm = null; renderDrill(); if (window.matchMedia('(max-width: 900px)').matches) document.body.classList.add('sheet'); break;
-    case 'swapgo': e.stopPropagation(); S.sel[S.fac] = t.dataset.id; renderCmpRows(); renderDrill(); if (window.matchMedia('(max-width: 900px)').matches) document.body.classList.add('sheet'); { const s = $('#sw-to'); if (s) { s.focus(); $('#swap').scrollIntoView({ block: 'nearest' }); } } break;
+    case 'swapgo': e.stopPropagation(); S.sel[S.fac] = t.dataset.id; renderCmpRows(); renderDrill(); if (window.matchMedia('(max-width: 900px)').matches) document.body.classList.add('sheet'); { const s = $('#sw-to'); if (s) { $('#swap').scrollIntoView({ block: 'nearest' }); cpOpen(s); } } break;
     case 'closedrill': document.body.classList.remove('sheet'); S.sel[S.fac] = null; renderCmpRows(); renderDrill(); break;
     case 'addrow': S.addRow = !S.addRow; renderCmp(); if (S.addRow) $('#ar-name').focus(); break;
     case 'export': doExport(); break;
-    case 'swap': doSwap($('#sw-to').value); break;
-    case 'sugg': { const s = $('#sw-to'); s.value = t.dataset.n; if (s.value !== t.dataset.n) { const o = document.createElement('option'); o.value = o.textContent = t.dataset.n; s.appendChild(o); s.value = t.dataset.n; } s.focus(); break; }
+    case 'swap': { const s = $('#sw-to'); if (!s.dataset.v) { cpOpen(s); break; } doSwap(s.dataset.v); break; }
+    case 'sugg': { const s = $('#sw-to'); setPick(s, t.dataset.n, chemLabel(t.dataset.n)); s.focus(); break; }
     case 'undo': {
       const u = S.undo; if (!u || u.f !== S.fac) break;
       const w = weekById(S.fac, u.wid); if (!w || w.locked) { S.undo = null; renderDrill(); break; }
@@ -808,7 +902,7 @@ document.addEventListener('click', e => {
     }
     case 'dline-del': if (!ed) break; { const m = modelOf(t.dataset.m); m.lines.splice(+t.dataset.l, 1); touchWeek(); renderDrill(); refreshCmp(); } break;
     case 'dline-add': if (!ed) break; {
-      const it = itemById(S.sel[S.fac]); const m = modelOf($('#d-addm').value); if (!it || !m) break;
+      const it = itemById(S.sel[S.fac]); const m = modelOf($('#d-addm').dataset.v); if (!it || !m) { if (it) cpOpen($('#d-addm')); break; }
       const chem = $('#d-addc') ? $('#d-addc').value : (it.rep[0] || it.name);
       m.lines.push({ chem, g: toNum($('#d-addg').value) }); touchWeek(); renderDrill(); refreshCmp(); } break;
     case 'row-del': { const it = itemById(S.sel[S.fac]); two('row:' + it.id, () => { d.rows = d.rows.filter(r => r.id !== it.id); S.sel[S.fac] = null; touchRows(); renderCmp(); }, renderDrill); break; }
@@ -826,7 +920,7 @@ document.addEventListener('click', e => {
     case 'madd': if (!ed) break; { const id = uid('m'); CTX.week.models.push({ id, name: 'Model mới', prs: 0, lines: [] }); S.msel[S.fac] = id; S.mq = ''; touchWeek(); renderModels(); $('#m-name').select(); } break;
     case 'mdup': if (!ed) break; { const m = modelOf(S.msel[S.fac]); const c = clone(m); c.id = uid('m'); c.name = m.name + ' (bản sao)'; c.prs = 0; CTX.week.models.push(c); S.msel[S.fac] = c.id; touchWeek(); renderModels(); } break;
     case 'mdel': if (!ed) break; { const m = modelOf(S.msel[S.fac]); two('m:' + m.id, () => { CTX.week.models = CTX.week.models.filter(x => x.id !== m.id); touchWeek(); renderAll(); }, renderMedit); } break;
-    case 'ladd': if (!ed) break; modelOf(S.msel[S.fac]).lines.push({ chem: '', g: 0 }); touchWeek(); renderMedit(); { const s = $$('[data-i="lkey"]').pop(); if (s) s.focus(); } break;
+    case 'ladd': if (!ed) break; modelOf(S.msel[S.fac]).lines.push({ chem: '', g: 0 }); touchWeek(); renderMedit(); { const s = $$('#medit .cp-btn[data-l]').pop(); if (s) cpOpen(s); } break;
     case 'ldel': if (!ed) break; modelOf(S.msel[S.fac]).lines.splice(+t.dataset.l, 1); touchWeek(); renderMedit(); break;
     case 'paste': S.paste = !S.paste; renderMedit(); break;
     case 'paste-ok': if (!ed) break; {
@@ -894,13 +988,12 @@ document.addEventListener('change', e => {
   else if (c === 'rs-adj') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.adj = t.checked ? 1 : 0; touchRows(); refreshCmp(); }
   else if (k === 'rs-name') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.name = t.value.trim() || r.name; touchRows(); renderCmpRows(); refreshCmp(); renderDrill(); }
   else if (k === 'rs-rep') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.rep = t.value.split(';').map(x => clean(x)).filter(Boolean); touchRows(); renderCmp(); }
-  else if (k === 'lkey' && CTX.editable) { const m = modelOf(S.msel[S.fac]); m.lines[+t.dataset.l].chem = t.value; touchWeek(); renderMedit(); }
 });
 document.addEventListener('submit', e => {
   const f = e.target; e.preventDefault();
   const d = cur();
   if (f.dataset.form === 'addrow') {
-    const name = $('#ar-name').value.trim(), rep = $('#ar-rep').value; if (!name) return;
+    const name = $('#ar-name').value.trim(), rep = $('#ar-rep').dataset.v; if (!name) return;
     const id = uid('c'); d.rows.push({ id, name, rep: rep ? [rep] : [name], code: '', adj: 1 }); S.sel[S.fac] = id; S.addRow = false; touchRows(); renderCmp();
   } else if (f.dataset.form === 'sync') {
     const u = $('#sync-url').value.trim();
