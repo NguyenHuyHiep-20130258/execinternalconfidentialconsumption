@@ -695,8 +695,9 @@ function renderModels() {
   const list = ms.filter(m => !mq || norm(m.name).includes(mq));
   $('#view-mdl').innerHTML = sub + `<div class="mgrid">
    <div class="mlist"><div class="mtools"><input type="search" id="mq" placeholder="Tìm model" value="${esc(S.mq)}" data-i="mq" aria-label="Tìm model">${CTX.editable ? '<button class="btn primary" data-a="madd">+ Model</button>' : ''}</div>
-     <p class="mute mcount">${ms.length} model · ${fmt(ms.reduce((a, m) => a + toNum(m.prs), 0), 0)} prs</p>
-     <ul id="mlist-ul">${list.map(m => `<li><button class="mi ${S.msel[S.fac] === m.id ? 'on' : ''}" data-a="msel" data-m="${esc(m.id)}"><span class="nm">${esc(m.name || '(chưa đặt tên)')}</span><span class="meta">${m.lines.length ? m.lines.length + ' hóa chất' : '<i class="warnt">chưa có hóa chất</i>'} · ${fmt(toNum(m.prs), 0)} prs</span></button></li>`).join('') || '<li class="empty-r">Không có model phù hợp.</li>'}</ul></div>
+     <div class="mcount"><span class="mute" id="mcount-t">${ms.length} model · ${fmt(ms.reduce((a, m) => a + toNum(m.prs), 0), 0)} prs</span>${CTX.editable ? `<button class="btn sm danger" data-a="clearprs">${S.confirm === 'clearprs' ? 'Bấm lần nữa để xóa hết số đôi' : 'Xóa số đôi'}</button>` : ''}</div>
+     <ul id="mlist-ul">${list.map(m => `<li class="mrow ${S.msel[S.fac] === m.id ? 'on' : ''}"><button class="mi ${S.msel[S.fac] === m.id ? 'on' : ''}" data-a="msel" data-m="${esc(m.id)}"><span class="nm">${esc(m.name || '(chưa đặt tên)')}</span><span class="meta">${m.lines.length ? m.lines.length + ' hóa chất' : '<i class="warnt">chưa có hóa chất</i>'}</span></button>`
+       + `<label class="mi-prs"><input class="num" inputmode="decimal" id="lp-${esc(m.id)}" data-i="lprs" data-m="${esc(m.id)}" value="${toNum(m.prs) ? esc(m.prs) : ''}" placeholder="0" aria-label="Total prs ${esc(m.name)}"${CTX.editable ? '' : ' disabled'}><span>prs</span></label></li>`).join('') || '<li class="empty-r">Không có model phù hợp.</li>'}</ul></div>
    <div class="medit" id="medit"></div></div>`;
   renderMedit();
 }
@@ -726,6 +727,17 @@ function refreshMedit() {
   const set = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
   set('m-sg', fmt(sg, 3)); set('m-sk', fmt(sk));
 }
+function refreshModelCount() {
+  const e = $('#mcount-t'); if (!e || !CTX.week) return;
+  const ms = CTX.week.models; e.textContent = ms.length + ' model · ' + fmt(ms.reduce((a, m) => a + toNum(m.prs), 0), 0) + ' prs';
+}
+document.addEventListener('keydown', e => {
+  const t = e.target; if (!t.matches || !t.matches('[data-i="lprs"]')) return;
+  if (e.key !== 'Enter' && e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const all = $$('#mlist-ul [data-i="lprs"]'), i = all.indexOf(t), n = all[i + (e.key === 'ArrowUp' ? -1 : 1)];
+  if (n) { n.focus(); n.select(); n.scrollIntoView({ block: 'nearest' }); }
+});
 function chemSumHtml() {
   const cat = CAT(), map = new Map();
   for (const m of CTX.models) for (const l of m.lines) {
@@ -943,7 +955,7 @@ document.addEventListener('click', e => {
     case 'wunlock': { const w = CTX.week; two('unlock', () => { w.locked = false; w.lockedAt = null; Store.markWeek(S.fac, w); renderAll(); }, renderPeriod); break; }
     case 'wdel': { const w = CTX.week; two('wdel', () => { d.weeks = d.weeks.filter(x => x.id !== w.id); Store.dropWeek(S.fac, w.id); fixView(S.fac); renderAll(); }, renderPeriod); break; }
     case 'mtab': S.mtab = t.dataset.v; renderModels(); break;
-    case 'msel': S.msel[S.fac] = t.dataset.m; S.paste = false; S.confirm = null; $$('#mlist-ul .mi').forEach(x => x.classList.toggle('on', x === t)); renderMedit(); break;
+    case 'msel': S.msel[S.fac] = t.dataset.m; S.paste = false; S.confirm = null; $$('#mlist-ul .mrow').forEach(x => { const on = x.contains(t); x.classList.toggle('on', on); x.querySelector('.mi').classList.toggle('on', on); }); renderMedit(); break;
     case 'madd': if (!ed) break; { const id = uid('m'); CTX.week.models.push({ id, name: 'Model mới', prs: 0, lines: [] }); S.msel[S.fac] = id; S.mq = ''; touchWeek(); renderModels(); $('#m-name').select(); } break;
     case 'mdup': if (!ed) break; { const m = modelOf(S.msel[S.fac]); const c = clone(m); c.id = uid('m'); c.name = m.name + ' (bản sao)'; c.prs = 0; CTX.week.models.push(c); S.msel[S.fac] = c.id; touchWeek(); renderModels(); } break;
     case 'mdel': if (!ed) break; { const m = modelOf(S.msel[S.fac]); two('m:' + m.id, () => { CTX.week.models = CTX.week.models.filter(x => x.id !== m.id); touchWeek(); renderAll(); }, renderMedit); } break;
@@ -969,6 +981,7 @@ document.addEventListener('click', e => {
     case 'day-del': { const k = t.dataset.d; two('day:' + k, () => { d.report[k] = []; Store.saveDay(S.fac, k, []); renderReport(); }, renderReport); break; }
     case 'mon-del': { const mon = t.dataset.m; two('mon:' + mon, () => { for (const k of reportDates(d.report)) if (k.slice(0, 7) === mon) { d.report[k] = []; Store.saveDay(S.fac, k, []); } S.openMonth = null; renderReport(); }, renderReport); break; }
     case 'backup': doBackup(); break;
+    case 'clearprs': if (!ed) break; two('clearprs', () => { CTX.week.models.forEach(m => { m.prs = 0; }); touchWeek(); renderModels(); }, renderModels); break;
     case 'sync-now': Store.sheetPoll().then(() => { if (S.tab === 'rep') renderReport(); }); break;
     case 'mon-view': S.view[S.fac] = 'M:' + t.dataset.m; S.tab = 'cmp'; renderAll(); break;
   }
@@ -987,9 +1000,15 @@ document.addEventListener('input', e => {
     if (k === 'dprs') $$(`[data-i="dprs"][data-m="${CSS.escape(m.id)}"]`).forEach(x => { if (x !== t) x.value = t.value; });
     touchWeek(); refreshDrill(); refreshCmp(); return;
   }
+  if (k === 'lprs') {
+    const lm = modelOf(t.dataset.m); if (!lm) return;
+    lm.prs = toNum(t.value); touchWeek(); refreshModelCount();
+    if (lm.id === S.msel[S.fac]) { const mp = $('#m-prs'); if (mp) mp.value = t.value; refreshMedit(); }
+    return;
+  }
   const m = modelOf(S.msel[S.fac]);
   if (k === 'mname' && m) { m.name = t.value; touchWeek(); const b = $('.mi.on .nm'); if (b) b.textContent = t.value || '(chưa đặt tên)'; }
-  else if (k === 'mprs' && m) { m.prs = toNum(t.value); touchWeek(); refreshMedit(); const b = $('.mi.on .meta'); if (b) b.innerHTML = (m.lines.length ? m.lines.length + ' hóa chất' : '<i class="warnt">chưa có hóa chất</i>') + ' · ' + fmt(m.prs, 0) + ' prs'; }
+  else if (k === 'mprs' && m) { m.prs = toNum(t.value); touchWeek(); refreshMedit(); refreshModelCount(); const lp = document.getElementById('lp-' + m.id); if (lp) lp.value = t.value; }
   else if (k === 'lg' && m) { m.lines[+t.dataset.l].g = toNum(t.value); touchWeek(); refreshMedit(); }
 });
 document.addEventListener('change', e => {
