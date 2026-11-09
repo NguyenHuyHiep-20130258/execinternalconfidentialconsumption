@@ -38,8 +38,8 @@ Settings → Pages → Build and deployment → Source: **Deploy from a branch**
 
 Trang có thể chạy thẳng trong Apps Script, không cần GitHub: dữ liệu đọc từ Google Sheet, người xem đăng nhập bằng tài khoản Google.
 
-1. `python3 build.py --gas` → `dist/gas/index.html` và `dist/gas/Code.gs`.
-2. Trong dự án Apps Script gắn với Google Sheet: dán `Code.gs`, tạo file HTML tên `index` và dán `index.html` → Save.
+1. `python3 build.py --gas` → `apps-script/index.html` (đi cùng `apps-script/Code.gs`).
+2. Trong dự án Apps Script gắn với Google Sheet: dán `apps-script/Code.gs`, tạo file HTML tên `index` và dán `apps-script/index.html` → Save.
 3. Deploy → Manage deployments → Edit → New version. Chọn quyền truy cập:
    - Tài khoản Google Workspace của công ty: Execute as **Me**, Who has access: **Anyone within <công ty>**.
    - Gmail cá nhân: Execute as **Me**, Who has access: **Anyone with Google account**; người xem (trừ chủ dự án) nhập PASSWORD. Muốn giới hạn theo email: Execute as **User accessing the web app**, chia sẻ Google Sheet cho từng người và đặt Script property `ALLOWED_EMAILS`.
@@ -62,7 +62,7 @@ node tests/test_core.js                     # kiểm tra tổng Actual/Report (c
 | `src/page.tmpl.html` | CSS và khung trang |
 | `src/gate.tmpl.html` | Trang nhập mật khẩu |
 | `build.py` | Ghép và mã hóa thành `index.html` |
-| `apps-script/Code.gs` | Kho dữ liệu chung trên Google Sheets (Apps Script web app) |
+| `apps-script/Code.gs`, `apps-script/index.html` | Kho dữ liệu chung trên Google Sheets và trang chạy trong Apps Script |
 | `data/` | Dữ liệu nhà máy dạng rõ (chỉ có trên máy, không đưa lên repo; bản mã hóa nằm trong `index.html`) |
 
 ## Cách tính

@@ -13,8 +13,8 @@
          with data/seed.json embedded when that file exists (it is git-ignored).
 
   python3 build.py --gas
-      -> dist/gas/index.html + dist/gas/Code.gs: the page served by Apps Script itself
-         (HtmlService). Data comes from the Google Sheet; no data is embedded.
+      -> apps-script/index.html: the page served by Apps Script itself (HtmlService),
+         next to apps-script/Code.gs. Data comes from the Google Sheet; no data is embedded.
 
   python3 build.py --local
       -> dist/local.html: standalone page with data/seed.json, no password (git-ignored).
@@ -69,8 +69,7 @@ def pages():
 
 if __name__ == '__main__':
     if '--gas' in sys.argv:
-        write('dist/gas/index.html', standalone(page(False, '{"gas":true}')))
-        write('dist/gas/Code.gs', rd('apps-script', 'Code.gs'))
+        write('apps-script/index.html', standalone(page(False, '{"gas":true}')))
     elif '--artifact' in sys.argv:
         write('dist/artifact.html', page(True))
     elif '--local' in sys.argv:
