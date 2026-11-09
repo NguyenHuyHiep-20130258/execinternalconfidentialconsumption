@@ -82,6 +82,7 @@ const Store = {
     let c = null;
     try { if (window.claude && window.claude.use) c = await window.claude.use('db'); } catch (e) { c = null; }
     if (c) { this.db = c; this.mode = 'db'; this.subscribe(); return; }
+    if (GAS) { this.mode = 'sheet'; this.gas = true; this.sheetStart('', gasToken()); return; }
     const url = syncUrl();
     if (url && SYNC && SYNC.token) { this.mode = 'sheet'; this.sheetStart(url, SYNC.token); return; }
     this.mode = 'local';
@@ -198,6 +199,12 @@ const Store = {
   /* ----- Google Sheets (Apps Script web app) ----- */
   getters: {}, seq: {}, ready: false, lastT: 0, lastSync: 0,
   async sheetCall(body) {
+    if (this.gas) { /* page served by Apps Script itself: google.script.run, signed in with Google */
+      return new Promise((res, rej) => google.script.run
+        .withSuccessHandler(j => (j && j.ok ? res(j) : rej({ code: (j && j.error) || 'server', message: j && j.message })))
+        .withFailureHandler(e => rej({ code: 'server', message: e && e.message }))
+        .api(Object.assign({ pw: this.token }, body)));
+    }
     let r;
     try {
       r = await fetch(this.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ pw: this.token }, body)) });
@@ -208,6 +215,8 @@ const Store = {
     return j;
   },
   sheetError(e) {
+    if (this.gas && e && e.code === 'unauthorized') { this.setStatus('error', 'cần mật khẩu'); askPassword(); return; }
+    if (this.gas && e && e.code === 'forbidden') { this.setStatus('error', 'tài khoản Google này chưa được cấp quyền xem dữ liệu'); return; }
     const m = { unauthorized: 'mật khẩu ở Google Sheets không khớp với mật khẩu trang', not_configured: 'Google Sheets chưa đặt PASSWORD trong Script properties', network: 'không kết nối được Google Sheets, sẽ thử lại' };
     this.setStatus('error', m[e && e.code] || (e && e.message) || 'không rõ lỗi');
   },
@@ -306,6 +315,24 @@ function fixView(f) {
   const v = S.view[f];
   if (v && v.startsWith('M:')) return;
   if (!weekById(f, v)) S.view[f] = D[f].weeks.length ? D[f].weeks[D[f].weeks.length - 1].id : null;
+}
+const GAS = typeof google !== 'undefined' && google.script && google.script.run;
+function gasToken() { try { return sessionStorage.getItem('hc-pw') || ''; } catch (e) { return ''; } }
+/* Apps Script deployments that cannot tell who the viewer is ask for the page password */
+function askPassword() {
+  if (document.getElementById('pwgate')) return;
+  const f = document.createElement('form');
+  f.id = 'pwgate'; f.className = 'pwgate';
+  f.innerHTML = '<div class="pwbox" role="dialog" aria-labelledby="pw-t"><b id="pw-t">Nhập mật khẩu để mở dữ liệu</b><p class="mute">Mật khẩu do người quản lý trang cung cấp.</p><label for="pw-in">Mật khẩu<input id="pw-in" type="password" required autocomplete="current-password"></label><p class="pwerr" id="pw-err" hidden>Sai mật khẩu. Thử lại.</p><button class="btn primary" type="submit">Mở dữ liệu</button></div>';
+  document.body.appendChild(f);
+  if (Store.token) f.querySelector('#pw-err').hidden = false;
+  f.querySelector('#pw-in').focus();
+  f.addEventListener('submit', e => {
+    e.preventDefault(); e.stopPropagation();
+    const pw = f.querySelector('#pw-in').value;
+    try { sessionStorage.setItem('hc-pw', pw); } catch (x) { /* ignore */ }
+    Store.token = pw; f.remove(); Store.setStatus('pending'); Store.sheetInitial();
+  });
 }
 function syncUrl() {
   let u = '';

@@ -1,5 +1,13 @@
 /**
- * Kho dữ liệu chung cho trang "Đối chiếu hóa chất" (GitHub Pages).
+ * Trang "Đối chiếu hóa chất" chạy trên Apps Script, cùng kho dữ liệu chung trong Google Sheet.
+ *
+ * Dự án gồm 2 file: Code.gs (file này) và index.html (trang, tạo bằng `python3 build.py --gas`).
+ * Mở trang: Web app URL (…/exec). Lưu ý: link này cũng nhận yêu cầu từ bản GitHub Pages cũ (doPost, cần mật khẩu).
+ *
+ * Quyền xem dữ liệu (google.script.run → api):
+ *  - ALLOWED_EMAILS (Script property, nhiều email cách nhau dấu phẩy): chỉ các tài khoản này được xem/sửa.
+ *    Cần Google nhận ra người xem: triển khai "Execute as: User accessing the web app", hoặc tài khoản Google Workspace cùng tên miền.
+ *  - Không đặt ALLOWED_EMAILS: người Google nhận ra được thì vào thẳng; người không nhận ra phải nhập PASSWORD.
  *
  * Cài đặt (một lần):
  *  1. Tạo một Google Sheet mới → Extensions (Tiện ích mở rộng) → Apps Script.
@@ -17,8 +25,32 @@ const SHEET_NAME = 'data';
 const CHUNK = 40000;          // một ô Google Sheets chứa tối đa 50.000 ký tự
 const HEAD = 4;               // số cột trước phần nội dung
 
-function doGet() {
-  return json_({ ok: true, app: 'doi-chieu-hoa-chat', configured: !!password_() });
+function doGet(e) {
+  if (e && e.parameter && e.parameter.health) return json_({ ok: true, app: 'doi-chieu-hoa-chat', configured: !!password_() });
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('Đối chiếu hóa chất')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/* entry point for the page above (google.script.run) */
+function api(req) {
+  req = req || {};
+  const who = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  const allow = String(PropertiesService.getScriptProperties().getProperty('ALLOWED_EMAILS') || '')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (allow.length) {
+    if (!who || allow.indexOf(who) < 0) return { ok: false, error: 'forbidden' };
+  } else if (!who && password_() && req.pw !== password_()) {
+    return { ok: false, error: 'unauthorized' };
+  }
+  try {
+    if (req.op === 'pull') return pull_(Number(req.since) || 0);
+    if (req.op === 'push') return push_(req.docs || []);
+    if (req.op === 'whoami') return { ok: true, who: who };
+    return { ok: false, error: 'bad_op' };
+  } catch (err) {
+    return { ok: false, error: 'server', message: String(err) };
+  }
 }
 
 function doPost(e) {

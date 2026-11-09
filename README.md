@@ -34,6 +34,16 @@ Mỗi tài liệu (bảng Comparison, một tuần, một ngày Report) là mộ
 
 Settings → Pages → Build and deployment → Source: **Deploy from a branch** → Branch: **main**, thư mục **/ (root)** → Save. Sau 1–2 phút trang chạy ở địa chỉ trên.
 
+## Chạy trên Apps Script (tên miền script.google.com)
+
+Trang có thể chạy thẳng trong Apps Script, không cần GitHub: dữ liệu đọc từ Google Sheet, người xem đăng nhập bằng tài khoản Google.
+
+1. `python3 build.py --gas` → `dist/gas/index.html` và `dist/gas/Code.gs`.
+2. Trong dự án Apps Script gắn với Google Sheet: dán `Code.gs`, tạo file HTML tên `index` và dán `index.html` → Save.
+3. Deploy → Manage deployments → Edit → New version. Chọn quyền truy cập:
+   - Tài khoản Google Workspace của công ty: Execute as **Me**, Who has access: **Anyone within <công ty>**.
+   - Gmail cá nhân: Execute as **Me**, Who has access: **Anyone with Google account**; người xem (trừ chủ dự án) nhập PASSWORD. Muốn giới hạn theo email: Execute as **User accessing the web app**, chia sẻ Google Sheet cho từng người và đặt Script property `ALLOWED_EMAILS`.
+
 ## Sửa và build lại
 
 ```bash

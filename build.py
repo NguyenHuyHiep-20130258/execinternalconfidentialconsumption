@@ -12,6 +12,10 @@
       -> dist/artifact.html: page body for publishing as a Claude artifact,
          with data/seed.json embedded when that file exists (it is git-ignored).
 
+  python3 build.py --gas
+      -> dist/gas/index.html + dist/gas/Code.gs: the page served by Apps Script itself
+         (HtmlService). Data comes from the Google Sheet; no data is embedded.
+
   python3 build.py --local
       -> dist/local.html: standalone page with data/seed.json, no password (git-ignored).
 """
@@ -64,7 +68,10 @@ def pages():
 
 
 if __name__ == '__main__':
-    if '--artifact' in sys.argv:
+    if '--gas' in sys.argv:
+        write('dist/gas/index.html', standalone(page(False, '{"gas":true}')))
+        write('dist/gas/Code.gs', rd('apps-script', 'Code.gs'))
+    elif '--artifact' in sys.argv:
         write('dist/artifact.html', page(True))
     elif '--local' in sys.argv:
         write('dist/local.html', standalone(page(True)))

@@ -207,6 +207,14 @@ input:disabled, select:disabled { opacity: .75; background: var(--head); }
 .cp-pop li.none { color: var(--muted); cursor: default; }
 .cp-pop mark { background: var(--warn-bg); color: inherit; border-radius: 2px; }
 
+/* password prompt for the Apps Script page */
+.pwgate { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; background: rgb(0 0 0 / .35); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.pwbox { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.pwbox p { margin: 0; }
+.pwbox label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.pwbox input { font-size: 16px; }
+.pwerr { color: var(--bad); font-size: 13px; }
+
 @media (max-width: 900px) {
   .split, .mgrid { grid-template-columns: minmax(0, 1fr); }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
