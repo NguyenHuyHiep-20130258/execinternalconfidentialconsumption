@@ -69,7 +69,15 @@ def pages():
 
 if __name__ == '__main__':
     if '--gas' in sys.argv:
-        write('apps-script/index.html', standalone(page(False, '{"gas":true}')))
+        # HtmlService strips comments itself and does it naively ("//" inside a string cuts the line),
+        # so ship the inline script without comments and refuse any "//" left in code.
+        import re
+        html = standalone(page(False, '{"gas":true}'))
+        a = html.index('const SEED'); z = html.rindex('</script>')
+        js = re.sub(r'/\*[\s\S]*?\*/', '', html[a:z])
+        js = '\n'.join(l for l in js.split('\n') if not l.lstrip().startswith('//'))
+        assert '//' not in js and '/*' not in js, 'comment-like sequence left in script'
+        write('apps-script/index.html', html[:a] + js + html[z:])
     elif '--artifact' in sys.argv:
         write('dist/artifact.html', page(True))
     elif '--local' in sys.argv:

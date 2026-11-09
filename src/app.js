@@ -774,7 +774,7 @@ function renderReport() {
     ${Store.mode === 'sheet' ? `<p class="mute">Dữ liệu được lưu chung trong Google Sheets: mọi trình duyệt mở trang đều thấy cùng dữ liệu, tự cập nhật khoảng 30 giây một lần.${Store.lastSync ? ' Lần đồng bộ gần nhất: ' + fmtStamp(new Date(Store.lastSync).toISOString()) + '.' : ''}</p>
       <div class="mact"><button class="btn" data-a="sync-now">Đồng bộ ngay</button></div>`
     : SYNC && SYNC.token ? `<p class="mute">Chưa nối Google Sheets nên dữ liệu chỉ nằm trong trình duyệt này. Dán Web app URL của Apps Script để nối (chỉ áp dụng cho trình duyệt này).</p>
-      <form class="mact" data-form="sync"><input id="sync-url" type="url" placeholder="https://script.google.com/macros/s/…/exec" aria-label="Web app URL"><button class="btn primary" type="submit">Nối Google Sheets</button></form>`
+      <form class="mact" data-form="sync"><input id="sync-url" type="url" placeholder="https:\/\/script.google.com/macros/s/…/exec" aria-label="Web app URL"><button class="btn primary" type="submit">Nối Google Sheets</button></form>`
     : '<p class="mute">Bản trang này chưa được build để đồng bộ.</p>'}
   </section>`}
   <section class="backup"><h3>Sao lưu dữ liệu</h3>
@@ -1024,7 +1024,7 @@ document.addEventListener('submit', e => {
     const id = uid('c'); d.rows.push({ id, name, rep: rep ? [rep] : [name], code: '', adj: 1 }); S.sel[S.fac] = id; S.addRow = false; touchRows(); renderCmp();
   } else if (f.dataset.form === 'sync') {
     const u = $('#sync-url').value.trim();
-    if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(u)) { S.importMsg = '!Link phải là Web app URL của Apps Script (https://script.google.com/macros/s/…/exec).'; renderReport(); return; }
+    if (!/^https:\/\/script\.google(usercontent)?\.com\/./.test(u)) { S.importMsg = '!Link phải là Web app URL của Apps Script (https:\/\/script.google.com/macros/s/…/exec).'; renderReport(); return; }
     try { localStorage.setItem('hc-sync-url', u); } catch (e) { /* ignore */ }
     Store.mode = 'sheet'; S.importMsg = 'Đang nối Google Sheets…'; Store.sheetStart(u, SYNC.token).then(() => { S.importMsg = ''; renderAll(); });
   } else if (f.dataset.form === 'newweek') {
