@@ -546,7 +546,7 @@ function visibleItems() {
   const q = norm(S.q);
   return CALC.list.filter(it => {
     if (q && !norm(it.name + ' ' + it.code + ' ' + it.rep.join(' ')).includes(q)) return false;
-    if (S.hideZero && !it.actual && !it.report && !it.stock) return false;
+    if (S.hideZero && !it.actual && !it.report) return false;
     if (S.onlyDev && ratioInfo(it.actual, it.report).c !== 'bad') return false;
     if (S.onlyFlag && !it.flag) return false;
     return true;
@@ -559,7 +559,6 @@ function renderCmp() {
     <div class="tile"><span>Actual (kg)</span><b id="tA"></b></div>
     <div class="tile"><span id="tRl">Report</span><b id="tR"></b></div>
     <div class="tile"><span>Actual / Report</span><b id="tP"></b></div>
-    <div class="tile"><span id="tSl">Stock</span><b id="tS"></b></div>
   </section>
   ${c.kind === 'none' ? `<div class="note start"><b>Bắt đầu với ${FAC[S.fac]}</b><ol><li>Vào tab <b>Report</b>, chọn file Chemical Daily Report (.xls/.xlsx) để có danh sách hóa chất và số Output.</li><li>Bấm <b>+ Tuần mới</b> ở trên để tạo tuần cần đối chiếu.</li><li>Vào tab <b>Model (Summary)</b>, thêm model, Total prs và g/prs từng hóa chất. Bảng này sẽ hiện Actual so với Report.</li></ol></div>`
     : reportDates(cur().report).some(x => x >= c.from && x <= c.to) ? '' : `<p class="note warn">Chưa có dữ liệu Report từ ${fmtDY(c.from)} đến ${fmtDY(c.to)}. Vào tab Report để nhập Chemical Daily Report.</p>`}
@@ -578,7 +577,7 @@ function renderCmp() {
       <button class="btn primary" type="submit">Thêm dòng</button><button class="btn" type="button" data-a="addrow">Hủy</button></form>` : ''}
   <div class="split">
     <div class="tablewrap"><table class="grid" id="cmpt">
-      <thead><tr><th class="n">#</th><th>Hóa chất</th><th class="r">Actual (kg)</th><th class="r" id="thR"></th><th class="r">A / R</th><th class="r" id="thS"></th><th></th></tr></thead>
+      <thead><tr><th class="n">#</th><th>Hóa chất</th><th class="r">Actual (kg)</th><th class="r" id="thR"></th><th class="r">A / R</th><th></th></tr></thead>
       <tbody id="cmpb"></tbody><tfoot id="cmpf"></tfoot></table></div>
     <aside class="drill" id="drill" aria-live="polite"></aside>
   </div>`;
@@ -588,9 +587,9 @@ function renderCmpRows() {
   const items = visibleItems();
   $('#cmpb').innerHTML = items.map((it, i) => `<tr data-a="sel" data-id="${esc(it.id)}" class="${S.sel[S.fac] === it.id ? 'sel' : ''} ${it.kind}" tabindex="0">
       <td class="n">${i + 1}</td><td class="nm">${esc(it.name)}<small>${esc([it.code, it.kind === 'cat' ? 'chưa có dòng riêng' : '', it.kind === 'x' ? 'không có trong Report' : '', it.rep.length > 1 ? 'gộp ' + it.rep.length + ' tên Report' : ''].filter(Boolean).join(' · '))}</small></td>
-      <td class="r num" data-v="a"></td><td class="r num" data-v="r"></td><td class="r"><span class="pill" data-v="p"></span></td><td class="r num" data-v="s"></td>
+      <td class="r num" data-v="a"></td><td class="r num" data-v="r"></td><td class="r"><span class="pill" data-v="p"></span></td>
       <td>${it.flag && CTX.editable ? `<button class="btn sm warnb" data-a="swapgo" data-id="${esc(it.id)}">Đổi chất</button>` : ''}</td></tr>`).join('')
-    || `<tr><td colspan="7" class="empty-r">${CALC.list.length ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hóa chất nào. Nhập Chemical Daily Report ở tab Report để bắt đầu.'}</td></tr>`;
+    || `<tr><td colspan="6" class="empty-r">${CALC.list.length ? 'Không có dòng nào khớp bộ lọc.' : 'Chưa có hóa chất nào. Nhập Chemical Daily Report ở tab Report để bắt đầu.'}</td></tr>`;
   refreshCmp();
 }
 function refreshCmp() {
@@ -599,15 +598,15 @@ function refreshCmp() {
   for (const tr of $$('#cmpb tr[data-id]')) {
     const it = itemById(tr.dataset.id); if (!it) continue;
     const x = ratioInfo(it.actual, it.report);
-    set(tr.querySelector('[data-v="a"]'), fmt(it.actual)); set(tr.querySelector('[data-v="r"]'), fmt(it.report)); set(tr.querySelector('[data-v="s"]'), fmt(it.stock));
+    set(tr.querySelector('[data-v="a"]'), fmt(it.actual)); set(tr.querySelector('[data-v="r"]'), fmt(it.report));
     const p = tr.querySelector('[data-v="p"]'); set(p, x.t); p.className = 'pill ' + x.c;
   }
   const lbl = rangeLabel(CTX.from, CTX.to);
-  set($('#tA'), fmt(CALC.tA)); set($('#tR'), fmt(CALC.tR)); set($('#tS'), fmt(CALC.tS));
-  set($('#tRl'), 'Report ' + lbl + ' (kg)'); set($('#thR'), 'Report ' + lbl); set($('#tSl'), 'Stock ' + fmtD(CTX.to) + ' (kg)'); set($('#thS'), 'Stock ' + fmtD(CTX.to));
+  set($('#tA'), fmt(CALC.tA)); set($('#tR'), fmt(CALC.tR));
+  set($('#tRl'), 'Report ' + lbl + ' (kg)'); set($('#thR'), 'Report ' + lbl);
   set($('#fcount'), String(CALC.flagged));
   const tx = ratioInfo(CALC.tA, CALC.tR), tp = $('#tP'); if (tp) { tp.textContent = tx.t; tp.className = 'big ' + tx.c; }
-  const frow = (lab, a, r, cls = '') => `<tr class="${cls}"><td></td><td class="nm">${lab}</td><td class="r num">${a == null ? '' : fmt(a)}</td><td class="r num">${fmt(r)}</td><td class="r">${a == null ? '' : `<span class="pill ${ratioInfo(a, r).c}">${ratioInfo(a, r).t}</span>`}</td><td></td><td></td></tr>`;
+  const frow = (lab, a, r, cls = '') => `<tr class="${cls}"><td></td><td class="nm">${lab}</td><td class="r num">${a == null ? '' : fmt(a)}</td><td class="r num">${fmt(r)}</td><td class="r">${a == null ? '' : `<span class="pill ${ratioInfo(a, r).c}">${ratioInfo(a, r).t}</span>`}</td><td></td></tr>`;
   let f = frow('TỔNG HÓA CHẤT', CALC.tA, CALC.tR, 'tot');
   if (CALC.hasAdj) f += frow('Tổng không tính ' + cur().rows.filter(r => r.adj === 0).map(r => esc(r.name)).join(', '), CALC.tAadj, CALC.tRadj);
   f += frow('WASTE CHEMICAL (chỉ có ở Report)', null, CALC.waste);
@@ -765,7 +764,7 @@ function renderReport() {
   const openM = S.openMonth || (groups[0] ? groups[0][0] : null);
   $('#view-rep').innerHTML = `
   <section class="drop" id="drop"><div><b>Nhập Chemical Daily Report</b>
-    <p>Chọn hoặc kéo thả file .xls / .xlsx của Mixing Room 1 (F1) hoặc 2 (F2). Có thể chọn nhiều file, nhiều tháng cùng lúc. Mỗi sheet ngày (ví dụ 26.10) được đọc thành một ngày: Output, DVL và Stock cuối ngày của từng hóa chất. Danh sách hóa chất trong Report cũng là danh sách để chọn khi nhập định mức model.</p></div>
+    <p>Chọn hoặc kéo thả file .xls / .xlsx của Mixing Room 1 (F1) hoặc 2 (F2). Có thể chọn nhiều file, nhiều tháng cùng lúc. Mỗi sheet ngày (ví dụ 26.10) được đọc thành một ngày: Output và DVL của từng hóa chất. Danh sách hóa chất trong Report cũng là danh sách để chọn khi nhập định mức model.</p></div>
     <label class="btn primary filebtn" for="file">Chọn file<input type="file" id="file" accept=".xls,.xlsx" multiple hidden></label></section>
   ${S.importMsg ? `<p class="note ${S.importMsg.startsWith('!') ? 'warn' : ''}" role="status">${esc(S.importMsg.replace(/^!/, ''))}</p>` : ''}
   ${S.items.length ? `<section class="prev"><h3>Xem trước: ${ok.length} ngày đọc được${skipped.length ? `, bỏ qua ${skipped.length} sheet` : ''}</h3>
@@ -778,8 +777,8 @@ function renderReport() {
   <section><h3>Dữ liệu Report đã có ở ${FAC[S.fac]}: ${dates.length} ngày, ${groups.length} tháng</h3>
   ${groups.map(([mon, xs]) => { const rowsAll = xs.map(x => d.report[x.date]); return `<details class="mon" ${mon === openM ? 'open' : ''} data-mon="${mon}"><summary><b>Tháng ${fmtM(mon)}</b><span class="mute">${xs.length} ngày · ${fmtD(xs[0].date)}–${fmtD(xs[xs.length - 1].date)} · Σ Output ${fmt(rowsAll.flat().reduce((a, b) => a + toNum(b[2]), 0))} kg · Σ DVL ${fmt(rowsAll.flat().reduce((a, b) => a + toNum(b[3]), 0))} kg</span></summary>
     <div class="mact"><button class="btn sm" data-a="mon-view" data-m="${mon}">Xem Comparison cả tháng</button><span class="grow"></span>${Store.readonly ? '' : `<button class="btn sm danger" data-a="mon-del" data-m="${mon}">${S.confirm === 'mon:' + mon ? 'Bấm lần nữa để xóa cả tháng' : 'Xóa cả tháng'}</button>`}</div>
-    <div class="tablewrap"><table class="grid compact"><thead><tr><th>Ngày</th><th class="r">Số chất</th><th class="r">Σ Output</th><th class="r">Σ DVL</th><th class="r">Σ Stock</th><th></th></tr></thead><tbody>
-    ${xs.slice().reverse().map(({ date: x }) => { const r = d.report[x]; return `<tr><td class="nm">${fmtDY(x)} <small>W${isoWeek(x)}</small></td><td class="r num">${r.length}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[2]), 0))}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[3]), 0))}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[4]), 0))}</td><td>${Store.readonly ? '' : `<button class="btn sm danger" data-a="day-del" data-d="${x}">${S.confirm === 'day:' + x ? 'Bấm lần nữa' : 'Xóa ngày'}</button>`}</td></tr>`; }).join('')}
+    <div class="tablewrap"><table class="grid compact"><thead><tr><th>Ngày</th><th class="r">Số chất</th><th class="r">Σ Output</th><th class="r">Σ DVL</th><th></th></tr></thead><tbody>
+    ${xs.slice().reverse().map(({ date: x }) => { const r = d.report[x]; return `<tr><td class="nm">${fmtDY(x)} <small>W${isoWeek(x)}</small></td><td class="r num">${r.length}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[2]), 0))}</td><td class="r num">${fmt(r.reduce((a, b) => a + toNum(b[3]), 0))}</td><td>${Store.readonly ? '' : `<button class="btn sm danger" data-a="day-del" data-d="${x}">${S.confirm === 'day:' + x ? 'Bấm lần nữa' : 'Xóa ngày'}</button>`}</td></tr>`; }).join('')}
     </tbody></table></div></details>`; }).join('') || '<p class="empty-r">Chưa có ngày nào. Chọn file Chemical Daily Report ở trên để bắt đầu.</p>'}
   </section>
   ${Store.mode === 'db' ? '' : `<section class="sync"><h3>Đồng bộ giữa các trình duyệt</h3>
@@ -846,14 +845,14 @@ function renderAll() {
 function sheetsForExport() {
   recalc();
   const lbl = rangeLabel(CTX.from, CTX.to);
-  const cmp = [['#', 'Hóa chất', 'Mã vật tư', 'Tên trong Report', 'Actual (kg)', 'Report ' + lbl + ' (kg)', 'A/R', 'Stock ' + fmtD(CTX.to) + ' (kg)', 'Ghi chú']];
-  CALC.list.forEach((it, i) => cmp.push([i + 1, it.name, it.code, it.rep.join(' + '), r6(it.actual), r6(it.report), it.report ? r6(it.actual / it.report) : '', r6(it.stock), it.kind === 'x' ? 'Không có trong Report' : it.flag ? 'Actual có, Report không' : '']));
-  cmp.push(['', 'TỔNG HÓA CHẤT', '', '', r6(CALC.tA), r6(CALC.tR), CALC.tR ? r6(CALC.tA / CALC.tR) : '', r6(CALC.tS)]);
+  const cmp = [['#', 'Hóa chất', 'Mã vật tư', 'Tên trong Report', 'Actual (kg)', 'Report ' + lbl + ' (kg)', 'A/R', 'Ghi chú']];
+  CALC.list.forEach((it, i) => cmp.push([i + 1, it.name, it.code, it.rep.join(' + '), r6(it.actual), r6(it.report), it.report ? r6(it.actual / it.report) : '', it.kind === 'x' ? 'Không có trong Report' : it.flag ? 'Actual có, Report không' : '']));
+  cmp.push(['', 'TỔNG HÓA CHẤT', '', '', r6(CALC.tA), r6(CALC.tR), CALC.tR ? r6(CALC.tA / CALC.tR) : '']);
   cmp.push(['', 'WASTE CHEMICAL', '', '', '', r6(CALC.waste)]);
   const sm = [['Tuần', 'NO', 'Model', 'Total prs', 'Hóa chất', 'g/prs', 'kg']];
   CTX.models.forEach((m, i) => { const wk = m.wk || wkLabel(CTX.week); if (!m.lines.length) sm.push([wk, i + 1, m.name, toNum(m.prs)]); m.lines.forEach(l => sm.push([wk, i + 1, m.name, toNum(m.prs), l.chem, toNum(l.g), r6(lineKg(m, l))])); });
-  const rp = [['Ngày', 'Chemical name', 'Material code', 'Output (kg)', 'DVL (kg)', 'Stock (kg)']];
-  for (const x of reportDates(cur().report)) if (x >= CTX.from && x <= CTX.to) for (const r of cur().report[x]) rp.push([x, r[0], r[1], r[2], r[3], r[4]]);
+  const rp = [['Ngày', 'Chemical name', 'Material code', 'Output (kg)', 'DVL (kg)']];
+  for (const x of reportDates(cur().report)) if (x >= CTX.from && x <= CTX.to) for (const r of cur().report[x]) rp.push([x, r[0], r[1], r[2], r[3]]);
   return { Comparison: cmp, Summary: sm, Report_Data: rp };
 }
 /* saving files: the claude.ai downloads capability inside an artifact, a plain browser download elsewhere */

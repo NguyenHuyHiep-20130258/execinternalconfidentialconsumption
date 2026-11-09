@@ -54,7 +54,7 @@ nav.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: 
 main, #period { max-width: 1480px; margin: 0 auto; padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 #period { padding-block: 14px 0; display: flex; flex-direction: column; gap: 10px; }
 
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
 .tile span { color: var(--muted); font-size: 12px; }
 .tile b, .big { font: 500 24px/1.1 var(--f-num); font-variant-numeric: tabular-nums; }
@@ -77,7 +77,7 @@ select { max-width: 100%; }
 .addrow { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
 .addrow label, .rowset label, .mhead label, .pastebox label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
 
-.split { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 14px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(500px, 42%); gap: 14px; align-items: start; }
 .tablewrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
 table.grid { width: 100%; border-collapse: collapse; }
 .split > .tablewrap { max-height: calc(100vh - 120px); overflow: auto; }
@@ -106,6 +106,10 @@ td.nm small { display: block; color: var(--muted); font-size: 11px; font-family:
 .dtable { border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; margin-bottom: 8px; }
 .dtable th { top: 0; }
 .drill input.num, .medit input.num, .mhead input.num { width: 84px; text-align: right; }
+.drill .dtable input.num { width: 64px; padding: 4px 6px; }
+.drill .dtable input[data-i="dprs"] { width: 76px; }
+.drill .dtable td.nm { min-width: 120px; }
+.drill .dtable th, .drill .dtable td { padding-left: 6px; padding-right: 6px; }
 .dadd { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; } .dadd select { flex: 1 1 160px; } .dadd input { width: 76px; }
 .rowset { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; } .rowset summary { cursor: pointer; font-weight: 500; }
 .rowset label { margin-top: 10px; } .rowset .btn { margin-top: 10px; }
