@@ -44,7 +44,11 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; 
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; background: transparent; padding: 6px 16px; cursor: pointer; font-weight: 500; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
-.status { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+.undo { margin-left: auto; display: inline-flex; gap: 6px; }
+.undo .btn { display: inline-flex; align-items: center; gap: 5px; }
+.undo svg { width: 14px; height: 14px; }
+.toast { position: fixed; z-index: 80; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); background: var(--ink); color: var(--bg); border-radius: 8px; padding: 8px 14px; font-size: 13px; box-shadow: 0 6px 20px rgb(0 0 0 / .2); }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
 .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .status.ok::before { background: var(--good); } .status.warn::before { background: var(--warn); } .status.bad::before { background: var(--bad); }
 .status.wait::before { background: var(--accent); }
@@ -245,6 +249,10 @@ input:disabled, select:disabled { opacity: .75; background: var(--head); }
       <button data-fac="f1" aria-pressed="false">F1 · Mixing Room 1</button>
       <button data-fac="f2" aria-pressed="true">F2 · Mixing Room 2</button>
     </div>
+    <div class="undo" role="group" aria-label="Hoàn tác">
+      <button class="btn sm" id="btn-undo" data-a="undo-all" disabled><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 1.5 6.5 5 10M2 6.5h7.5a4 4 0 0 1 0 8H7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Hoàn tác</button>
+      <button class="btn sm" id="btn-redo" data-a="redo-all" disabled aria-label="Làm lại"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11 3l3.5 3.5L11 10M14 6.5H6.5a4 4 0 0 0 0 8H9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Làm lại</button>
+    </div>
     <span class="status wait" id="status" role="status"><span id="status-t">Đang kết nối…</span></span>
   </div>
   <nav class="tabs" role="tablist" aria-label="Màn hình">
@@ -254,6 +262,7 @@ input:disabled, select:disabled { opacity: .75; background: var(--head); }
   </nav>
 </header>
 <div id="period"></div>
+<div id="toast" class="toast" role="status" hidden></div>
 <main>
   <div id="view-cmp"></div>
   <div id="view-mdl" hidden></div>

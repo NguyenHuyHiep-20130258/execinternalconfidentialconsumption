@@ -97,6 +97,7 @@ const Store = {
         }
       }
     } catch (e) { /* ignore */ }
+    undoReset('f1'); undoReset('f2');
     this.setStatus('local');
     renderAll();
   },
@@ -112,7 +113,7 @@ const Store = {
         if (!snap.metadata.hasPendingWrites && snap.exists) {
           const x = clone(snap.data());
           if (!x.v) { this.fromV1(f, x); }
-          else if (x.rev !== this.rev[ap] && !this.dirty.has(ap)) { this.appInit[f] = true; D[f].rows = x.rows || D[f].rows; this.syncWeeks(f); renderAll(); }
+          else if (x.rev !== this.rev[ap] && !this.dirty.has(ap)) { this.appInit[f] = true; D[f].rows = x.rows || D[f].rows; this.syncWeeks(f); undoReset(f); renderAll(); }
           else this.appInit[f] = true;
         }
         done();
@@ -123,7 +124,7 @@ const Store = {
           if (ch.type === 'removed') this.dbWeeks[f].delete(ch.doc.id);
           else this.dbWeeks[f].set(ch.doc.id, Object.assign({ id: ch.doc.id }, clone(ch.doc.data())));
         }
-        if (this.appInit[f]) { this.syncWeeks(f); renderAll(); }
+        if (this.appInit[f]) { const b = JSON.stringify(D[f].weeks); this.syncWeeks(f); if (JSON.stringify(D[f].weeks) !== b) undoReset(f); renderAll(); }
         done();
       }, err);
       this.db.collection('report_' + f).onSnapshot(qs => {
@@ -143,7 +144,7 @@ const Store = {
     const mg = migrateV1(x.models || [], x.rows || [], cat, ALIAS[f]);
     D[f].rows = mg.rows;
     D[f].weeks = [{ id: 'w' + (x.from || '2026-10-01').replace(/-/g, ''), from: x.from, to: x.to, locked: false, models: mg.models }];
-    fixView(f); this.markRows(f); this.markWeek(f, D[f].weeks[0]); renderAll();
+    fixView(f); this.markRows(f); this.markWeek(f, D[f].weeks[0]); undoReset(f); renderAll();
   },
   syncWeeks(f) {
     const local = new Map(D[f].weeks.map(w => [w.id, w]));
@@ -233,6 +234,7 @@ const Store = {
       this.ready = true;
       if (!j.docs.length) await this.sheetSeed();
       else { this.applyDocs(j.docs, true); this.lastT = j.now; }
+      undoReset('f1'); undoReset('f2');
       this.lastSync = Date.now();
       if (this.dirty.size) await this.sheetFlush(); else this.setStatus('saved');
       renderAll();
@@ -272,7 +274,7 @@ const Store = {
     try {
       if (this.dirty.size && !this.flushing) await this.sheetFlush();
       const j = await this.sheetCall({ op: 'pull', since: this.lastT });
-      if (j.docs.length && this.applyDocs(j.docs, false)) renderSafe();
+      if (j.docs.length && this.applyDocs(j.docs, false)) { this.lastChanged.forEach(undoReset); renderSafe(); }
       this.lastT = Math.max(this.lastT, j.now || 0);
       this.lastSync = Date.now();
       if (!this.dirty.size) this.setStatus('saved');
@@ -281,6 +283,7 @@ const Store = {
   },
   applyDocs(docs, initial) {
     let changed = false;
+    this.lastChanged = new Set();
     if (initial) for (const f of ['f1', 'f2']) if (docs.some(d => d.key === 'app/' + f)) { D[f].weeks = []; changed = true; }
     for (const d of docs) {
       if (d.t > this.lastT) this.lastT = d.t;
@@ -289,6 +292,7 @@ const Store = {
       const [col, id] = d.key.split('/');
       const f = col === 'app' ? id : col.split('_')[1];
       if (!D[f]) continue;
+      if (col !== 'app' && !col.startsWith('weeks_')) { /* report day */ } else this.lastChanged.add(f);
       if (col === 'app') { if (d.body && d.body.rows) { D[f].rows = d.body.rows; changed = true; } }
       else if (col.startsWith('weeks_')) {
         const i = D[f].weeks.findIndex(w => w.id === id);
@@ -349,8 +353,57 @@ document.addEventListener('focusout', () => {
   if (!S.pendingRender) return;
   setTimeout(() => { const a = document.activeElement; if (!(a && a.matches && a.matches('input, textarea, select'))) { S.pendingRender = false; renderAll(); } }, 0);
 });
-const touchWeek = () => { if (CTX && CTX.week) Store.markWeek(S.fac, CTX.week); };
-const touchRows = () => Store.markRows(S.fac);
+/* ---------- undo / redo: snapshots of the Comparison rows and all weeks of one factory ---------- */
+const UNDO = { f1: { base: null, past: [], future: [], burst: null }, f2: { base: null, past: [], future: [], burst: null } };
+const snapState = f => JSON.stringify({ rows: D[f].rows, weeks: D[f].weeks });
+function undoReset(f) { const u = UNDO[f]; clearTimeout(u.burst); u.burst = null; u.base = snapState(f); u.past = []; u.future = []; renderUndo(); }
+/* call right after a local change: the state before it becomes one undo step (typing within 1.2 s counts as one step) */
+function undoNote(f) {
+  const u = UNDO[f];
+  if (u.base == null) u.base = snapState(f);
+  if (!u.burst && u.base !== snapState(f)) { u.past.push(u.base); if (u.past.length > 50) u.past.shift(); u.future = []; }
+  clearTimeout(u.burst);
+  u.burst = setTimeout(() => { u.burst = null; u.base = snapState(f); renderUndo(); }, 1200);
+  renderUndo();
+}
+function undoApply(dir) {
+  const f = S.fac, u = UNDO[f];
+  if (Store.readonly) return;
+  clearTimeout(u.burst); u.burst = null;
+  const cur = snapState(f), src = dir < 0 ? u.past : u.future, dst = dir < 0 ? u.future : u.past;
+  if (!src.length) return;
+  const target = src.pop(); dst.push(cur);
+  const a = JSON.parse(cur), b = JSON.parse(target);
+  D[f].rows = b.rows; D[f].weeks = b.weeks;
+  if (JSON.stringify(a.rows) !== JSON.stringify(b.rows)) Store.markRows(f);
+  const before = new Map(a.weeks.map(w => [w.id, JSON.stringify(w)]));
+  for (const w of b.weeks) if (before.get(w.id) !== JSON.stringify(w)) Store.markWeek(f, w);
+  for (const w of a.weeks) if (!b.weeks.some(x => x.id === w.id)) Store.dropWeek(f, w.id);
+  u.base = target; S.undo = null; S.confirm = null;
+  sortWeeks(f); fixView(f); renderAll();
+  toast(dir < 0 ? 'Đã hoàn tác một bước' : 'Đã làm lại một bước');
+}
+function renderUndo() {
+  const u = UNDO[S.fac], bu = $('#btn-undo'), br = $('#btn-redo'); if (!bu) return;
+  const n = u.past.length;
+  bu.disabled = Store.readonly || !n; br.disabled = Store.readonly || !u.future.length;
+  bu.title = n ? 'Hoàn tác (Ctrl+Z), còn ' + n + ' bước' : 'Chưa có thay đổi để hoàn tác';
+  br.title = u.future.length ? 'Làm lại (Ctrl+Y), ' + u.future.length + ' bước' : 'Không có bước để làm lại';
+}
+let toastTimer = null;
+function toast(msg) {
+  const t = $('#toast'); if (!t) return;
+  t.textContent = msg; t.hidden = false; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2500);
+}
+document.addEventListener('keydown', e => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase(); if (k !== 'z' && k !== 'y') return;
+  const t = e.target; if (t && t.matches && t.matches('input:not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable]')) return;
+  e.preventDefault(); undoApply(k === 'y' || e.shiftKey ? 1 : -1);
+});
+const touchWeek = () => { if (CTX && CTX.week) { Store.markWeek(S.fac, CTX.week); undoNote(S.fac); } };
+const touchRows = () => { Store.markRows(S.fac); undoNote(S.fac); };
 
 const STATUS = {
   pending: ['wait', 'Đang kết nối kho dữ liệu…'], slow: ['warn', 'Chưa kết nối được kho dữ liệu, đang dùng dữ liệu có sẵn trên trang'],
@@ -838,7 +891,7 @@ function renderAll() {
   $$('[data-fac]').forEach(b => b.setAttribute('aria-pressed', b.dataset.fac === S.fac ? 'true' : 'false'));
   $$('[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === S.tab ? 'true' : 'false'));
   $('#view-cmp').hidden = S.tab !== 'cmp'; $('#view-mdl').hidden = S.tab !== 'mdl'; $('#view-rep').hidden = S.tab !== 'rep';
-  renderStatus(); recalc(); renderPeriod();
+  renderStatus(); renderUndo(); recalc(); renderPeriod();
   if (S.tab === 'cmp') renderCmp(); else if (S.tab === 'mdl') renderModels(); else renderReport();
 }
 
@@ -889,7 +942,7 @@ async function doRestore(file) {
       D[f] = { rows: x[f].rows || [], weeks: x[f].weeks || [], report: x[f].report || {} };
       fixView(f);
       for (const day of Object.keys(D[f].report)) Store.saveDay(f, day, D[f].report[day]);
-      Store.markRows(f); D[f].weeks.forEach(w => Store.markWeek(f, w));
+      Store.markRows(f); D[f].weeks.forEach(w => Store.markWeek(f, w)); undoNote(f);
     }
     S.importMsg = 'Đã khôi phục dữ liệu từ ' + file.name + '.';
   } catch (e) { S.importMsg = '!File này không phải bản sao lưu của trang Đối chiếu hóa chất.'; }
@@ -936,7 +989,7 @@ document.addEventListener('click', e => {
       const u = S.undo; if (!u || u.f !== S.fac) break;
       const w = weekById(S.fac, u.wid); if (!w || w.locked) { S.undo = null; renderDrill(); break; }
       u.changes.forEach(c => { const m = w.models.find(x => x.id === c.mid); if (m && m.lines[c.li]) m.lines[c.li].chem = c.old; });
-      Store.markWeek(S.fac, w); S.undo = null; recalc(); S.sel[S.fac] = CALC.idOf(u.changes[0].old); renderCmpRows(); renderDrill(); refreshCmp(); break;
+      Store.markWeek(S.fac, w); undoNote(S.fac); S.undo = null; recalc(); S.sel[S.fac] = CALC.idOf(u.changes[0].old); renderCmpRows(); renderDrill(); refreshCmp(); break;
     }
     case 'dline-del': if (!ed) break; { const m = modelOf(t.dataset.m); m.lines.splice(+t.dataset.l, 1); touchWeek(); renderDrill(); refreshCmp(); } break;
     case 'dline-add': if (!ed) break; {
@@ -950,9 +1003,9 @@ document.addEventListener('click', e => {
     case 'wnew': S.newWeek = !S.newWeek; renderPeriod(); break;
     case 'wlock': S.confirm = 'lock'; renderPeriod(); break;
     case 'wlock-no': S.confirm = null; renderPeriod(); break;
-    case 'wlock-ok': { const w = CTX.week; if (!w) break; w.locked = true; w.lockedAt = nowStamp(); S.confirm = null; S.undo = null; Store.markWeek(S.fac, w); renderAll(); break; }
-    case 'wunlock': { const w = CTX.week; two('unlock', () => { w.locked = false; w.lockedAt = null; Store.markWeek(S.fac, w); renderAll(); }, renderPeriod); break; }
-    case 'wdel': { const w = CTX.week; two('wdel', () => { d.weeks = d.weeks.filter(x => x.id !== w.id); Store.dropWeek(S.fac, w.id); fixView(S.fac); renderAll(); }, renderPeriod); break; }
+    case 'wlock-ok': { const w = CTX.week; if (!w) break; w.locked = true; w.lockedAt = nowStamp(); S.confirm = null; S.undo = null; undoNote(S.fac); Store.markWeek(S.fac, w); renderAll(); break; }
+    case 'wunlock': { const w = CTX.week; two('unlock', () => { w.locked = false; w.lockedAt = null; undoNote(S.fac); Store.markWeek(S.fac, w); renderAll(); }, renderPeriod); break; }
+    case 'wdel': { const w = CTX.week; two('wdel', () => { d.weeks = d.weeks.filter(x => x.id !== w.id); undoNote(S.fac); Store.dropWeek(S.fac, w.id); fixView(S.fac); renderAll(); }, renderPeriod); break; }
     case 'mtab': S.mtab = t.dataset.v; renderModels(); break;
     case 'msel': S.msel[S.fac] = t.dataset.m; S.paste = false; S.confirm = null; $$('#mlist-ul .mrow').forEach(x => { const on = x.contains(t); x.classList.toggle('on', on); x.querySelector('.mi').classList.toggle('on', on); }); renderMedit(); break;
     case 'madd': if (!ed) break; { const id = uid('m'); CTX.week.models.push({ id, name: 'Model mới', prs: 0, lines: [] }); S.msel[S.fac] = id; S.mq = ''; touchWeek(); renderModels(); $('#m-name').select(); } break;
@@ -980,6 +1033,8 @@ document.addEventListener('click', e => {
     case 'day-del': { const k = t.dataset.d; two('day:' + k, () => { d.report[k] = []; Store.saveDay(S.fac, k, []); renderReport(); }, renderReport); break; }
     case 'mon-del': { const mon = t.dataset.m; two('mon:' + mon, () => { for (const k of reportDates(d.report)) if (k.slice(0, 7) === mon) { d.report[k] = []; Store.saveDay(S.fac, k, []); } S.openMonth = null; renderReport(); }, renderReport); break; }
     case 'backup': doBackup(); break;
+    case 'undo-all': undoApply(-1); break;
+    case 'redo-all': undoApply(1); break;
     case 'clearprs': if (!ed) break; two('clearprs', () => { CTX.week.models.forEach(m => { m.prs = 0; }); touchWeek(); renderModels(); }, renderModels); break;
     case 'sync-now': Store.sheetPoll().then(() => { if (S.tab === 'rep') renderReport(); }); break;
     case 'mon-view': S.view[S.fac] = 'M:' + t.dataset.m; S.tab = 'cmp'; renderAll(); break;
@@ -1054,7 +1109,7 @@ document.addEventListener('submit', e => {
     if (blank) models.forEach(m => { m.prs = 0; });
     const w = { id, from, to, locked: false, models };
     d.weeks.push(w); sortWeeks(S.fac); S.view[S.fac] = id; S.newWeek = false; S.sel[S.fac] = null;
-    Store.markWeek(S.fac, w); renderAll();
+    Store.markWeek(S.fac, w); undoNote(S.fac); renderAll();
   }
 });
 /* drag & drop */
@@ -1067,6 +1122,7 @@ document.addEventListener('drop', e => {
 });
 
 (async function start() {
+  UNDO.f1.base = snapState('f1'); UNDO.f2.base = snapState('f2');
   renderAll();
   try { if (window.claude && window.claude.use) { const dl = await window.claude.use('downloads'); if (dl) { window.__dl = dl; const b = $('#btn-export'); if (b) b.hidden = false; } } } catch (e) { /* none */ }
   await Store.init();
