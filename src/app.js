@@ -622,6 +622,7 @@ function renderCmp() {
     <label class="chk" for="hz"><input type="checkbox" id="hz" data-c="hz" ${S.hideZero ? 'checked' : ''}> Ẩn dòng bằng 0</label>
     <span class="grow"></span>
     <button class="btn" data-a="addrow">+ Thêm dòng</button>
+    <button class="btn" data-a="capture">Chụp ảnh báo cáo</button>
     <button class="btn" data-a="export" id="btn-export" ${canSave() ? '' : 'hidden'}>Xuất Excel</button>
   </div>
   ${S.addRow ? `<form class="addrow" data-form="addrow">
@@ -661,7 +662,6 @@ function refreshCmp() {
   const tx = ratioInfo(CALC.tA, CALC.tR), tp = $('#tP'); if (tp) { tp.textContent = tx.t; tp.className = 'big ' + tx.c; }
   const frow = (lab, a, r, cls = '') => `<tr class="${cls}"><td></td><td class="nm">${lab}</td><td class="r num">${a == null ? '' : fmt(a)}</td><td class="r num">${fmt(r)}</td><td class="r">${a == null ? '' : `<span class="pill ${ratioInfo(a, r).c}">${ratioInfo(a, r).t}</span>`}</td><td></td></tr>`;
   let f = frow('TỔNG HÓA CHẤT', CALC.tA, CALC.tR, 'tot');
-  if (CALC.hasAdj) f += frow('Tổng không tính ' + cur().rows.filter(r => r.adj === 0).map(r => esc(r.name)).join(', '), CALC.tAadj, CALC.tRadj);
   f += frow('WASTE CHEMICAL (chỉ có ở Report)', null, CALC.waste);
   f += frow('TỔNG GỒM WASTE', null, CALC.tR + CALC.waste, 'tot');
   const cf = $('#cmpf'); if (cf) cf.innerHTML = f;
@@ -719,7 +719,6 @@ function renderDrill() {
   ${it.kind === 'row' ? `<details class="rowset"><summary>Cài đặt dòng</summary>
     <label for="rs-name">Tên hiển thị<input id="rs-name" value="${esc(it.name)}" data-i="rs-name"></label>
     <label for="rs-rep">Tên trong Report được cộng vào dòng này (cách nhau bằng dấu ;)<input id="rs-rep" value="${esc(it.rep.join('; '))}" data-i="rs-rep" list="catlist"></label>
-    <label class="chk" for="rs-adj"><input type="checkbox" id="rs-adj" data-c="rs-adj" ${it.adj === 0 ? '' : 'checked'}> Tính vào tổng đã điều chỉnh</label>
     <button class="btn danger" data-a="row-del">${S.confirm === 'row:' + it.id ? 'Bấm lần nữa để xóa dòng' : 'Xóa dòng này'}</button>
     <datalist id="catlist">${[...cat.values()].map(c => `<option value="${esc(c.name)}">`).join('')}</datalist>
   </details>` : it.kind === 'cat' ? `<p class="hint">Chất này có trong Report nhưng chưa có dòng riêng ở bảng Comparison. <button class="btn sm" data-a="pin">Tạo dòng riêng</button></p>` : ''}`;
@@ -736,6 +735,124 @@ function refreshDrill() {
   set('d-sg', fmt(sg, 3)); set('d-sk', fmt(sk)); set('d-act', fmt(sk) + ' kg');
   set('d-rep', 'Report ' + fmt(it.report) + ' kg · ' + ratioInfo(it.actual, it.report).t);
 }
+
+/* ---------- report image of the Comparison ---------- */
+const CAP = { canvas: null };
+function capTitle() {
+  const c = CTX, fac = S.fac === 'f1' ? 'F1 · Mixing Room 1' : 'F2 · Mixing Room 2';
+  if (c.kind === 'month') return { fac, period: 'Cả tháng ' + fmtM(c.mon) + ' (' + c.weeks.length + ' tuần)', status: '' };
+  if (c.kind !== 'week') return { fac, period: '', status: '' };
+  const w = c.week;
+  return { fac, period: 'Tuần ' + wkLabel(w) + '/' + w.to.slice(0, 4) + ' · W' + isoWeek(w.from), status: w.locked ? 'Đã xác nhận ' + fmtStamp(w.lockedAt) : 'Nháp, chưa xác nhận' };
+}
+function drawCapture(hideZero) {
+  recalc();
+  const items = CALC.list.filter(it => !hideZero || Math.abs(it.actual) > 0.0005 || Math.abs(it.report) > 0.0005);
+  const W = 1180, P = 32, RH = 34, dpr = 2;
+  const col = { n: P + 8, name: P + 44, act: P + 760, rep: P + 900, ar: P + 1040 };
+  const H = 214 + 40 + items.length * RH + 3 * RH + 54;
+  const cv = document.createElement('canvas'); cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const SANS = '"IBM Plex Sans", "Segoe UI", system-ui, sans-serif', MONO = '"IBM Plex Mono", Consolas, ui-monospace, monospace';
+  const C = { bg: '#ffffff', band: '#0b6b73', ink: '#16222a', muted: '#5a6a74', line: '#dfe5e8', head: '#eef2f4', zebra: '#f7f9fa',
+    ok: ['#dff3e7', '#1a7a48'], warn: ['#fbecc9', '#8f5800'], bad: ['#fbe0dd', '#b3261e'], mute: ['#eef2f4', '#5a6a74'] };
+  const text = (s, x, y, font, color, align = 'left', max) => {
+    g.font = font; g.fillStyle = color; g.textAlign = align; g.textBaseline = 'middle';
+    s = String(s);
+    if (max && g.measureText(s).width > max) { while (s.length > 1 && g.measureText(s + '…').width > max) s = s.slice(0, -1); s += '…'; }
+    g.fillText(s, x, y);
+  };
+  const pill = (x, y, info) => {
+    const [bg, fg] = C[info.c] || C.mute; g.font = '500 12px ' + MONO;
+    const w = Math.max(64, g.measureText(info.t).width + 18);
+    g.fillStyle = bg; g.beginPath(); g.roundRect(x - w, y - 11, w, 22, 11); g.fill();
+    text(info.t, x - w / 2, y, '500 12px ' + MONO, fg, 'center');
+  };
+  g.fillStyle = C.bg; g.fillRect(0, 0, W, H);
+  const t = capTitle(), lbl = rangeLabel(CTX.from, CTX.to);
+  g.fillStyle = C.band; g.fillRect(0, 0, W, 6);
+  text('Đối chiếu hóa chất · ' + t.fac, P, 40, '600 22px ' + SANS, C.ink);
+  text([t.period, t.status, 'Report ' + fmtDY(CTX.from) + ' – ' + fmtDY(CTX.to)].filter(Boolean).join('   ·   '), P, 70, '400 14px ' + SANS, C.muted);
+  const now = new Date();
+  text('Xuất lúc ' + String(now.getDate()).padStart(2, '0') + '/' + String(now.getMonth() + 1).padStart(2, '0') + '/' + now.getFullYear() + ' ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0'), W - P, 40, '400 13px ' + SANS, C.muted, 'right');
+  const tiles = [['Actual (kg)', fmt(CALC.tA), C.ink], ['Report ' + lbl + ' (kg)', fmt(CALC.tR), C.ink], ['Actual / Report', ratioInfo(CALC.tA, CALC.tR).t, (C[ratioInfo(CALC.tA, CALC.tR).c] || C.mute)[1]],
+    ['Lệch trên 25%', String(CALC.list.filter(it => ratioInfo(it.actual, it.report).c === 'bad').length) + ' dòng', C.ink]];
+  const tw = (W - 2 * P - 3 * 12) / 4;
+  tiles.forEach(([k, v, colr], i) => {
+    const x = P + i * (tw + 12), y = 96;
+    g.fillStyle = C.zebra; g.strokeStyle = C.line; g.lineWidth = 1; g.beginPath(); g.roundRect(x, y, tw, 84, 10); g.fill(); g.stroke();
+    text(k, x + 16, y + 24, '400 13px ' + SANS, C.muted);
+    text(v, x + 16, y + 56, '500 26px ' + MONO, colr);
+  });
+  let y = 206;
+  g.fillStyle = C.head; g.fillRect(P, y, W - 2 * P, 36);
+  const hy = y + 18, hf = '600 12px ' + SANS;
+  text('#', col.n, hy, hf, C.muted); text('Hóa chất', col.name, hy, hf, C.muted);
+  text('Actual (kg)', col.act, hy, hf, C.muted, 'right'); text('Report ' + lbl + ' (kg)', col.rep, hy, hf, C.muted, 'right'); text('A / R', col.ar, hy, hf, C.muted, 'right');
+  y += 36;
+  items.forEach((it, i) => {
+    if (i % 2) { g.fillStyle = C.zebra; g.fillRect(P, y, W - 2 * P, RH); }
+    const cy = y + RH / 2;
+    text(i + 1, col.n, cy, '400 12px ' + SANS, C.muted);
+    g.font = '500 14px ' + SANS; const nameW = Math.min(g.measureText(it.name).width, 430);
+    text(it.name, col.name, cy, '500 14px ' + SANS, C.ink, 'left', 430);
+    const sub = [it.code, it.kind === 'x' ? 'không có trong Report' : ''].filter(Boolean).join(' · ');
+    if (sub) text(sub, col.name + nameW + 10, cy + 1, '400 11px ' + MONO, it.kind === 'x' ? C.bad[1] : C.muted, 'left', 560 - nameW - 10);
+    text(fmt(it.actual), col.act, cy, '400 14px ' + MONO, C.ink, 'right');
+    text(fmt(it.report), col.rep, cy, '400 14px ' + MONO, C.ink, 'right');
+    pill(col.ar + 6, cy, ratioInfo(it.actual, it.report));
+    y += RH;
+    g.fillStyle = C.line; g.fillRect(P, y - 1, W - 2 * P, 1);
+  });
+  const foot = [['TỔNG HÓA CHẤT', CALC.tA, CALC.tR, true], ['WASTE CHEMICAL (chỉ có ở Report)', null, CALC.waste, false], ['TỔNG GỒM WASTE', null, CALC.tR + CALC.waste, true]];
+  foot.forEach(([lab, a, r, strong]) => {
+    if (strong) { g.fillStyle = C.head; g.fillRect(P, y, W - 2 * P, RH); }
+    const cy = y + RH / 2, f = (strong ? '600 ' : '400 ') + '14px ';
+    text(lab, col.name, cy, f + SANS, C.ink);
+    if (a != null) text(fmt(a), col.act, cy, f + MONO, C.ink, 'right');
+    text(fmt(r), col.rep, cy, f + MONO, C.ink, 'right');
+    if (a != null) pill(col.ar + 6, cy, ratioInfo(a, r));
+    y += RH;
+  });
+  text(items.length + ' hóa chất' + (hideZero ? ' (đã ẩn dòng có Actual và Report bằng 0)' : '') + '   ·   A/R: xanh lệch ≤10%, vàng ≤25%, đỏ >25%', P, y + 24, '400 12px ' + SANS, C.muted);
+  return cv;
+}
+async function openCapture() {
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch (e) { /* ignore */ }
+  let m = document.getElementById('capmodal');
+  if (!m) {
+    m = document.createElement('div'); m.id = 'capmodal'; m.className = 'capmodal';
+    m.innerHTML = `<div class="capbox" role="dialog" aria-labelledby="cap-t"><header><b id="cap-t">Ảnh báo cáo Comparison</b><button class="icon" data-a="cap-close" aria-label="Đóng">×</button></header>
+      <div class="mact"><label class="chk" for="cap-zero"><input type="checkbox" id="cap-zero" data-c="capzero" checked> Ẩn dòng bằng 0</label><span class="grow"></span>
+      ${canSave() ? '<button class="btn primary" data-a="cap-dl">Tải ảnh PNG</button>' : ''}<button class="btn" data-a="cap-copy">Sao chép ảnh</button></div>
+      <p class="hint" id="cap-msg">Có thể chuột phải vào ảnh → Sao chép hình ảnh, rồi dán vào email hoặc Zalo.</p>
+      <div class="capimg"><img id="cap-img" alt="Ảnh bảng Comparison"></div></div>`;
+    document.body.appendChild(m);
+  }
+  m.hidden = false; renderCapture();
+}
+function renderCapture() {
+  const hide = $('#cap-zero') ? $('#cap-zero').checked : true;
+  CAP.canvas = drawCapture(hide);
+  $('#cap-img').src = CAP.canvas.toDataURL('image/png');
+}
+function closeCapture() { const m = document.getElementById('capmodal'); if (m) m.hidden = true; }
+const capName = () => 'Comparison_' + FAC[S.fac] + '_' + CTX.from + '_' + CTX.to + '.png';
+function capDownload() {
+  if (!CAP.canvas) return;
+  CAP.canvas.toBlob(b => { saveFile(capName(), b, 'image/png').catch(() => {}); }, 'image/png');
+}
+async function capCopy() {
+  const msg = $('#cap-msg');
+  try {
+    const blob = await new Promise(res => CAP.canvas.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    msg.textContent = 'Đã sao chép ảnh. Dán (Ctrl+V) vào email, Zalo hoặc Teams.';
+  } catch (e) {
+    msg.textContent = 'Trình duyệt không cho sao chép ở đây. Chuột phải vào ảnh → Sao chép hình ảnh, hoặc bấm Tải ảnh PNG.';
+  }
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { const m = document.getElementById('capmodal'); if (m && !m.hidden) closeCapture(); } });
 
 /* ---------- Models ---------- */
 function renderModels() {
@@ -1033,6 +1150,10 @@ document.addEventListener('click', e => {
     case 'day-del': { const k = t.dataset.d; two('day:' + k, () => { d.report[k] = []; Store.saveDay(S.fac, k, []); renderReport(); }, renderReport); break; }
     case 'mon-del': { const mon = t.dataset.m; two('mon:' + mon, () => { for (const k of reportDates(d.report)) if (k.slice(0, 7) === mon) { d.report[k] = []; Store.saveDay(S.fac, k, []); } S.openMonth = null; renderReport(); }, renderReport); break; }
     case 'backup': doBackup(); break;
+    case 'capture': openCapture(); break;
+    case 'cap-close': closeCapture(); break;
+    case 'cap-dl': capDownload(); break;
+    case 'cap-copy': capCopy(); break;
     case 'undo-all': undoApply(-1); break;
     case 'redo-all': undoApply(1); break;
     case 'clearprs': if (!ed) break; two('clearprs', () => { CTX.week.models.forEach(m => { m.prs = 0; }); touchWeek(); renderModels(); }, renderModels); break;
@@ -1079,13 +1200,13 @@ document.addEventListener('change', e => {
     const f = $('#wf').value, to = $('#wt').value; if (!f || !to) return;
     w.from = f <= to ? f : to; w.to = f <= to ? to : f; sortWeeks(S.fac); touchWeek(); renderAll();
   }
+  else if (c === 'capzero') { renderCapture(); }
   else if (c === 'hz') { S.hideZero = t.checked; renderCmpRows(); refreshCmp(); }
   else if (c === 'od') { S.onlyDev = t.checked; renderCmpRows(); refreshCmp(); }
   else if (c === 'of') { S.onlyFlag = t.checked; renderCmpRows(); refreshCmp(); }
   else if (c === 'dall') { $$('.d-pick').forEach(x => { x.checked = t.checked; }); }
   else if (c === 'itm') { S.items[+t.dataset.i2].checked = t.checked; renderReport(); }
   else if (c === 'imon') { S.items.forEach(x => { if (!x.skip && x.date.slice(0, 7) === t.dataset.m) x.checked = t.checked; }); renderReport(); }
-  else if (c === 'rs-adj') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.adj = t.checked ? 1 : 0; touchRows(); refreshCmp(); }
   else if (k === 'rs-name') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.name = t.value.trim() || r.name; touchRows(); renderCmpRows(); refreshCmp(); renderDrill(); }
   else if (k === 'rs-rep') { const r = d.rows.find(x => x.id === S.sel[S.fac]); r.rep = t.value.split(';').map(x => clean(x)).filter(Boolean); touchRows(); renderCmp(); }
 });
